@@ -15,7 +15,7 @@ namespace IS2Mod.ControlTypes
         public string DialogName { get; set; } = "";
         public string Title { get; set; } = "";
 
-        public DialogElement(ICoreClientAPI capi, UIControl _MainContainer, string _DialogName, string _Title) : base(capi)
+        public DialogElement(ICoreClientAPI capi, UIControl _MainContainer, string _DialogName, string _Title = "") : base(capi)
         {
             MainContainer = _MainContainer;
             DialogName = _DialogName;
@@ -39,8 +39,9 @@ namespace IS2Mod.ControlTypes
             compo.AddDialogBG(bgBounds, true);
             compo.BeginChildElements(bgBounds);  // <-- IMPORTANT
 
-            
 
+            MainContainer.Margin = 15;
+            MainContainer.Padding = 15;
             MainContainer.Composer = compo;
             MainContainer.CompileAllObjects(MainContainer.Children);
 
