@@ -16,6 +16,8 @@ Core Element of this Framework is to provide a Stackcontainer based approach to 
 * Long Term Sustainablity by decoupling this System as far as possible from the Vanilla one, so Game updates don't break all the User Interfaces
 
 As of so far there are already some Systems in place but the whole thing needs some more work done to get it really going. 
+So far only 2 Controls are implemented but the others should work too with the System. 
+Also the Controls are only implemented barebone for default construction. 
 
 <h2> What is included in here</h2>
 
