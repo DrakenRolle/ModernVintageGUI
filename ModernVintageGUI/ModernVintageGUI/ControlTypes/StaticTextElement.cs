@@ -17,7 +17,17 @@ namespace IS2Mod.ControlTypes
             Text = _text;
             TextOrientation = _orientation;
             Font = _font;
+            onMouseDown += StaticTextElement_onMouseDown;
 
+        }
+
+        /// <summary>
+        /// Not fully implemented yet. Eventchain from Container needed for this. 
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void StaticTextElement_onMouseDown(object? sender, EventArgs e)
+        {
         }
 
         private string m_Text;

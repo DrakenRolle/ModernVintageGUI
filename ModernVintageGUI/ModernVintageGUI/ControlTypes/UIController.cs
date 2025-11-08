@@ -147,6 +147,16 @@ namespace IS2Mod.ControlTypes
 
         #region Eventhandlers (Probably there is more coming)
         public event PropertyChangedEventHandler PropertyChanged;
+
+
+        public event EventHandler onMouseDown;
+        public event EventHandler onMouseUp;
+        public event EventHandler onMouseWheel;
+        public event EventHandler onKeyDown;
+        public event EventHandler onKeyUp;
+        public event EventHandler onKeyPress;
+
+
         #endregion
 
         #region Constructors
@@ -155,7 +165,7 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public UIControl() 
         {
-            IsAutoSize = true;
+            IsAutoSize = true;            
         }
 
         /// <summary>
@@ -233,6 +243,59 @@ namespace IS2Mod.ControlTypes
                 m_IsAutoSize = false;
             }
         }
+        #endregion
+
+        #region EventInvokers
+        /// <summary>
+        /// Eventchain WIP
+        /// </summary>
+        /// <param name="mouseEvent"></param>
+        internal void InvokeOnMouseDown(EventArgs mouseEvent)
+        {
+            onMouseDown?.Invoke(this, mouseEvent);
+            //RecomposeToMain();
+        }
+        /// <summary>
+        /// Eventchain WIP
+        /// </summary>
+        internal void InvokeOnMouseUp(EventArgs mouseEvent)
+        {
+            onMouseUp?.Invoke(this, mouseEvent);
+            //RecomposeToMain();
+        }
+        /// <summary>
+        /// Eventchain WIP
+        /// </summary>
+        internal void InvokeOnMouseWheel(EventArgs mouseEvent)
+        {
+            onMouseWheel?.Invoke(this, mouseEvent);
+            //RecomposeToMain();
+        }
+        /// <summary>
+        /// Eventchain WIP
+        /// </summary>
+        internal void InvokeOnKeyDown(EventArgs mouseEvent)
+        {
+            onKeyDown?.Invoke(this, mouseEvent);
+            //RecomposeToMain();
+        }
+        /// <summary>
+        /// Eventchain WIP
+        /// </summary>
+        internal void InvokeOnKeyUp(EventArgs mouseEvent)
+        {
+            onKeyDown?.Invoke(this, mouseEvent);
+            //RecomposeToMain();
+        }
+        /// <summary>
+        /// Eventchain WIP
+        /// </summary>
+        internal void InvokeOnKeyPress(EventArgs mouseEvent)
+        {
+            onKeyPress?.Invoke(this, mouseEvent);
+            //RecomposeToMain();
+        }
+
         #endregion
 
         #region User Helpfunctions
@@ -393,7 +456,7 @@ namespace IS2Mod.ControlTypes
         {
             if (IsStaticElement)
             {
-                Composer.AddStaticElement(ControlGuiElement);
+                Composer.AddStaticElement(ControlGuiElement);                
             }
             else
             {

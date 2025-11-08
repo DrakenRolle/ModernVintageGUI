@@ -31,24 +31,34 @@ namespace IS2Mod.ControlTypes
 
             ElementBounds bgBounds = ElementBounds.Fill
                 .WithFixedPadding(GuiStyle.ElementToDialogPadding);
-            bgBounds.BothSizing = ElementSizing.FitToChildren;
+            bgBounds.BothSizing = ElementSizing.Fixed;
 
             var compo = capi.Gui.CreateCompo(DialogName, dialogBounds);
 
             compo.AddDialogTitleBar(Title, OnTitleBarClose);
             compo.AddDialogBG(bgBounds, true);
             compo.BeginChildElements(bgBounds);  // <-- IMPORTANT
-
-
+            
             MainContainer.Margin = 15;
             MainContainer.Padding = 15;
             MainContainer.Composer = compo;
             MainContainer.CompileAllObjects(MainContainer.Children);
-
+            bgBounds = bgBounds.WithFixedHeight(MainContainer.Size.Y).WithFixedWidth(MainContainer.Size.X);
+            bgBounds.WithFixedPosition(MainContainer.Position.X, MainContainer.Position.Y);
             compo.EndChildElements();
 
             SingleComposer = compo.Compose();
             
+        }
+        public void OnMouseDown(MouseEvent args)
+        {
+
+            args.Handled = true;
+        }
+
+        void MouseDown()
+        {
+
         }
 
         void OnTitleBarClose() => TryClose();
