@@ -12,6 +12,7 @@ namespace IS2Mod.Enums
         Bottom,
         Left,
         Right,
+        Fill,
         None
     }
 }
