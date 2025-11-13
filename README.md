@@ -9,11 +9,12 @@ Core Element of this Framework is to provide a Stackcontainer based approach to 
 * - Achieving this with making the Developer only define the Data he want to show and let this API handle Positioning, Sizing, Order.
   - Control focused approch like in other .NET UI Frameworks like, Winforms,WPF, UWP and so on.
 * Dialog Scaling and Control Positioning should be working independent from Scale or Window Size
-* <b>UI DESIGNER :D<b> 
+* <b>UI DESIGNER :D<b>
+    * Not final thought but my idea was using the WPF Designer with Custom Controls, to you can create UIs in XAML with the WPF Designer to create Vintage Story User Interfaces
 * either JSON or XML exportable Format
 * easy to implement Custom Controls
-* Weight-Based Size distribtion
 * Long Term Sustainablity by decoupling this System as far as possible from the Vanilla one, so Game updates don't break all the User Interfaces
+* Long Term thought: FixedPositioning reintegrated, but compatible with Designer
 
 As of so far there are already some Systems in place but the whole thing needs some more work done to get it really going. 
 So far only 2 Controls are implemented but the others should work too with the System. 
