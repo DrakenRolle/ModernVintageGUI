@@ -12,17 +12,62 @@ namespace IS2Mod.ControlTypes
     public abstract class UIControl : INotifyPropertyChanged
     {
 
-        public event EventHandler<MouseEventArgs> Clicked;
-        public event EventHandler<MouseEventArgs> Enter;
-        public event EventHandler<MouseEventArgs> Exit;
-        public event EventHandler<MouseEventArgs> MouseDown;
-        public event EventHandler<MouseEventArgs> MouseUp;
+
 
 
 
         #region Events
         public event PropertyChangedEventHandler PropertyChanged;
         public event EventHandler OnAfterUIControllerBuilt;
+        
+        public event EventHandler<MouseEventArgs> Clicked;
+        public event EventHandler<MouseEventArgs> Enter;
+        public event EventHandler<MouseEventArgs> Exit;
+        public event EventHandler<MouseEventArgs> MouseDown;
+        public event EventHandler<MouseEventArgs> MouseUp;
+        public event EventHandler<MouseEventArgs> MouseMove;
+
+        public event EventHandler<Events.MouseWheelEventArgs> MouseWheel;
+
+
+
+        public void InvokeEventClicked(MouseEvent vsArgs)
+        {
+            var args = new MouseEventArgs(vsArgs);
+            Clicked?.Invoke(this, args);
+        }
+
+        public void InvokeEventMouseMove(MouseEvent vsArgs)
+        {
+            var args = new MouseEventArgs(vsArgs);
+            MouseMove?.Invoke(this, args);
+        }
+        public void InvokeEventEnter(MouseEvent vsArgs)
+        {
+            var args = new MouseEventArgs(vsArgs);
+            Enter?.Invoke(this, args);
+        }
+        public void InvokeEventExit(MouseEvent vsArgs)
+        {
+            var args = new MouseEventArgs(vsArgs);
+            Exit?.Invoke(this, args);
+        }
+        public void InvokeEventMouseDown(MouseEvent vsArgs)
+        {
+            var args = new MouseEventArgs(vsArgs);
+            MouseDown?.Invoke(this, args);
+        }
+        public void InvokeEventMouseUp(MouseEvent vsArgs)
+        {
+            var args = new MouseEventArgs(vsArgs);
+            MouseUp?.Invoke(this, args);
+        }
+        public void InvokeEventMouseWheel(Vintagestory.API.Client.MouseWheelEventArgs vsArgs)
+        {
+            var args = new Events.MouseWheelEventArgs(vsArgs);
+            MouseWheel?.Invoke(this, args);
+        }
+
         #endregion
 
         #region Properties
@@ -511,6 +556,109 @@ namespace IS2Mod.ControlTypes
             }
 
             return new PointD(clippedWidth, clippedHeight);
+        }
+        #endregion
+        // Fixed Hit Detection for UIControl - handles nested children correctly
+
+        #region Hit Detection
+        /// <summary>
+        /// Performs hit testing to find which control is at the given screen coordinates.
+        /// Returns null if the click is outside the dialog or no control is found.
+        /// </summary>
+        /// <param name="screenX">Screen X coordinate</param>
+        /// <param name="screenY">Screen Y coordinate</param>
+        /// <returns>The deepest control at the given position, or null if none found</returns>
+        protected UIControl HitTest(int screenX, int screenY)
+        {
+            // First check if we're even inside the dialog bounds
+            if (!IsPointInDialog(screenX, screenY))
+            {
+                return null;
+            }
+
+            // Convert screen coordinates to dialog-relative coordinates
+            double relativeX = screenX - Position.X;
+            double relativeY = screenY - Position.Y;
+
+            // Recursively search for the deepest control at this position
+            return HitTestRecursive(this, relativeX, relativeY);
+        }
+
+        /// <summary>
+        /// Checks if a point is within the dialog's bounds (using absolute screen coordinates)
+        /// </summary>
+        protected bool IsPointInDialog(int screenX, int screenY)
+        {
+            return screenX >= Position.X &&
+                   screenX <= Position.X + Size.X &&
+                   screenY >= Position.Y &&
+                   screenY <= Position.Y + Size.Y;
+        }
+
+        /// <summary>
+        /// Recursively searches the control hierarchy to find the deepest control at the given position.
+        /// Returns the most specific (deepest) control, preferring children over parents.
+        /// Coordinates are relative to the current control's parent.
+        /// </summary>
+        protected virtual UIControl HitTestRecursive(UIControl control, double relativeX, double relativeY)
+        {
+            // Special case: if this is the dialog itself (root), coordinates are already relative to it
+            // So we check against position (0, 0) for the dialog
+            bool isDialog = control == this;
+
+            if (isDialog)
+            {
+                // For dialog, just check if the relative coordinates are within bounds (starting at 0,0)
+                if (relativeX < 0 || relativeX > control.Size.X || relativeY < 0 || relativeY > control.Size.Y)
+                {
+                    return null;
+                }
+            }
+            else
+            {
+                // For children, check if point is within this control's bounds
+                if (!IsPointInControl(control, relativeX, relativeY))
+                {
+                    return null;
+                }
+            }
+
+            // Check children first (from front to back, deepest first)
+            // Iterate in reverse order so controls rendered on top are checked first
+            for (int i = control.Children.Count - 1; i >= 0; i--)
+            {
+                UIControl child = control.Children[i];
+
+                // Convert coordinates to be relative to the child
+                // If this is the dialog, relativeX/Y are already relative to dialog (0,0)
+                // Otherwise, we need to subtract the current control's position
+                double childRelativeX = isDialog ? relativeX - child.Position.X : relativeX - child.Position.X;
+                double childRelativeY = isDialog ? relativeY - child.Position.Y : relativeY - child.Position.Y;
+
+                UIControl hitChild = child.HitTestRecursive(child, childRelativeX, childRelativeY);
+
+                if (hitChild != null)
+                {
+                    // Found a child that contains the point
+                    return hitChild;
+                }
+            }
+
+            // No children contain the point, so this control is the hit target
+            // Don't return the dialog itself as a hit target
+            return isDialog ? null : control;
+        }
+
+        /// <summary>
+        /// Checks if a point is within a control's bounds.
+        /// The point coordinates are relative to the control's parent.
+        /// </summary>
+        protected bool IsPointInControl(UIControl control, double relativeX, double relativeY)
+        {
+            return relativeX >= control.Position.X &&
+                   relativeX <= control.Position.X + control.Size.X &&
+                   relativeY >= control.Position.Y &&
+                   relativeY <= control.Position.Y + control.Size.Y;
         }
         #endregion
 

@@ -142,7 +142,7 @@ namespace IS2Mod.ControlTypes.Custom
 
             var platform = ((ClientPlatformWindows)ScreenManager.Platform);
             platform.MouseGrabbed = false;
-            
+
             platform.mouseEventHandlers.Add(this);
             // Update state
             IsVisible = true;
@@ -153,7 +153,7 @@ namespace IS2Mod.ControlTypes.Custom
             CalculateAllPositions();
             // Center on screen (after size is known)
             CenterOnScreen();
-            
+
             Refresh();
         }
 
@@ -208,8 +208,90 @@ namespace IS2Mod.ControlTypes.Custom
 
         public void Refresh()
         {
-
             RenderDialog();
+        }
+        #endregion
+
+        #region Mouse Event Handlers (Placeholder implementations)
+
+        // Fixed Mouse Event Handlers for CustomDialogElement
+
+        private UIControl currentlyHovered = null;
+        private UIControl pressedControl = null;
+
+        public void OnMouseDown(MouseEvent e)
+        {
+            UIControl clickedControl = HitTest(e.X, e.Y);
+
+            if (clickedControl != null)
+            {
+                pressedControl = clickedControl;
+                clickedControl.InvokeEventMouseDown(e);
+            }
+            else
+            {
+                pressedControl = null;
+                // Clicked outside controls or outside dialog
+            }
+        }
+
+        public void OnMouseUp(MouseEvent e)
+        {
+            UIControl releasedControl = HitTest(e.X, e.Y);
+
+            // Invoke mouse up on the control under cursor
+            if (releasedControl != null)
+            {
+                releasedControl.InvokeEventMouseUp(e);
+            }
+
+            // Check if this is a complete click (mouse down and up on same control)
+            if (pressedControl != null && releasedControl == pressedControl)
+            {
+                pressedControl.InvokeEventClicked(e);
+            }
+
+            // Clear pressed state
+            pressedControl = null;
+        }
+
+        public void OnMouseMove(MouseEvent e)
+        {
+            UIControl controlUnderMouse = HitTest(e.X, e.Y);
+
+            // Check if we moved to a different control
+            if (controlUnderMouse != currentlyHovered)
+            {
+                // Mouse left previous control
+                if (currentlyHovered != null)
+                {
+                    currentlyHovered.InvokeEventExit(e);
+                }
+
+                // Mouse entered new control
+                if (controlUnderMouse != null)
+                {
+                    controlUnderMouse.InvokeEventEnter(e);
+                }
+
+                // Update current hover state
+                currentlyHovered = controlUnderMouse;
+            }
+
+            // Always invoke mouse move on currently hovered control
+            if (currentlyHovered != null)
+            {
+                currentlyHovered.InvokeEventMouseMove(e);
+            }
+        }
+
+        public void OnMouseWheel(MouseWheelEventArgs e)
+        {
+            // Use current hovered control for mouse wheel events
+            if (currentlyHovered != null)
+            {
+                currentlyHovered.InvokeEventMouseWheel(e);
+            }
         }
         #endregion
 
@@ -243,22 +325,6 @@ namespace IS2Mod.ControlTypes.Custom
             }
 
             _isDisposed = true;
-        }
-
-        public void OnMouseDown(MouseEvent e)
-        {
-        }
-
-        public void OnMouseUp(MouseEvent e)
-        {
-        }
-
-        public void OnMouseMove(MouseEvent e)
-        {
-        }
-
-        public void OnMouseWheel(MouseWheelEventArgs e)
-        {
         }
 
         ~CustomDialogElement()

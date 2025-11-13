@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 
 namespace IS2Mod.ControlTypes.Events
@@ -23,6 +24,19 @@ namespace IS2Mod.ControlTypes.Events
         public int Modifiers { get; }
 
         public bool Handled { get; set; }
+
+
+        public MouseEventArgs(MouseEvent vsMouseEventArgs)
+        {
+            X = vsMouseEventArgs.X;
+            Y = vsMouseEventArgs.Y;
+            DeltaX = vsMouseEventArgs.DeltaX;
+            DeltaY = vsMouseEventArgs.DeltaY;
+            Button = vsMouseEventArgs.Button;
+            Modifiers = vsMouseEventArgs.Modifiers;
+
+        }
+
         public MouseEventArgs(int x, int y, int deltaX, int deltaY, EnumMouseButton button, int modifiers)
         {
             X = x;

@@ -1,6 +1,8 @@
 using Cairo;
 using IS2Mod.Enums;
+using System.Diagnostics;
 using Vintagestory.API.Client;
+using Vintagestory.API.Common;
 
 namespace IS2Mod.ControlTypes
 {
@@ -54,8 +56,42 @@ namespace IS2Mod.ControlTypes
                 _Margin: 0
             );
             _border.Children.Add(_textLabel);
+
+            this.Clicked += ButtonControl_Clicked;
+            this.Enter += ButtonControl_Enter;
+            this.Exit += ButtonControl_Exit;
         }
 
+        private void ButtonControl_Exit(object? sender, Events.MouseEventArgs e)
+        {
+            Debug.WriteLine("Button Exit");
+        }
+
+        private void ButtonControl_Enter(object? sender, Events.MouseEventArgs e)
+        {
+            Debug.WriteLine("Button Enter");
+        }
+
+        private void ButtonControl_Clicked(object? sender, Events.MouseEventArgs e)
+        {
+            
+        }
+
+
+
+
+        protected override UIControl HitTestRecursive(UIControl control, double relativeX, double relativeY)
+        {
+            // Check if point is within this control's bounds
+            if (!IsPointInControl(control, relativeX, relativeY))
+            {
+                return null;
+            }
+
+            // No children contain the point, so this control is the hit target
+            // Don't return the dialog itself as a hit target
+            return control;
+        }
         public override PointD CalculateSize()
         {
             // Let base calculate size normally
