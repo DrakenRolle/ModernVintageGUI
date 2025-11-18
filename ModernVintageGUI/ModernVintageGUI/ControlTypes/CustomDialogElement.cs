@@ -46,16 +46,7 @@ namespace IS2Mod.ControlTypes.Custom
         #endregion
 
         #region Renderer Management
-        public override void InitializeComponents()
-        {
-            RectangleControl control = new RectangleControl
-            {
-                BackgroundColor = new ElementColor(0, 0, 0, 0.5),
-                BorderColor = new ElementColor(1, 1, 1, 0.2),
-                BorderWidth = 2,
-                RoundedCorners = 10
-            };
-        }
+
         private void RegisterRenderer()
         {
             _renderer = new CustomUIRenderer(Api, this);
