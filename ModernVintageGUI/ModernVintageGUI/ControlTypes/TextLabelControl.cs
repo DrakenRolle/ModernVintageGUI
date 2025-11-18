@@ -47,7 +47,7 @@ namespace IS2Mod.ControlTypes
             TextOrientation orientation = TextOrientation.Left,
             bool wordWrap = false,
             int lineHeight = 20,
-            int padding = 5,
+            int padding = 0,
             string _Name = "",
             PointD? _Size = null,
             Orientation _Orientation = Enums.Orientation.Top,
@@ -202,67 +202,70 @@ namespace IS2Mod.ControlTypes
         private void DrawSingleLineText(Context ctx)
         {
             TextExtents te = ctx.TextExtents(Text);
-            double baseY = FontSize * 0.8;
+            Cairo.FontExtents fe = ctx.FontExtents;
 
-            (double x, double y) = GetTextPosition(te, baseY);
+            (double x, double y) = GetTextPosition(te, fe);
 
             ctx.MoveTo(x, y);
             ctx.ShowText(Text);
         }
 
-        private (double x, double y) GetTextPosition(TextExtents te, double baseY)
+        // FIXED: Corrected text positioning logic, especially for vertical centering
+        private (double x, double y) GetTextPosition(TextExtents te, Cairo.FontExtents fe)
         {
             double x = Position.X;
             double y = Position.Y;
+
+            double baselineOffset = fe.Ascent;
 
             switch (Orientation)
             {
                 case TextOrientation.Left:
                 case TextOrientation.TopLeft:
                     x = Position.X + Padding;
-                    y = Position.Y + Padding + baseY;
+                    y = Position.Y + Padding + baselineOffset;
                     break;
 
                 case TextOrientation.Center:
                 case TextOrientation.MiddleCenter:
                     x = Position.X + (Size.X - te.Width) / 2;
-                    y = Position.Y + Size.Y / 2 + baseY / 2;
+                    y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
                     break;
 
                 case TextOrientation.Right:
                 case TextOrientation.TopRight:
                     x = Position.X + Size.X - te.Width - Padding;
-                    y = Position.Y + Padding + baseY;
+                    y = Position.Y + Padding + baselineOffset;
                     break;
 
                 case TextOrientation.TopCenter:
                     x = Position.X + (Size.X - te.Width) / 2;
-                    y = Position.Y + Padding + baseY;
+                    y = Position.Y + Padding + baselineOffset;
                     break;
 
                 case TextOrientation.MiddleLeft:
                     x = Position.X + Padding;
-                    y = Position.Y + Size.Y / 2 + baseY / 2;
+                    y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
                     break;
 
                 case TextOrientation.MiddleRight:
                     x = Position.X + Size.X - te.Width - Padding;
-                    y = Position.Y + Size.Y / 2 + baseY / 2;
+                    y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
                     break;
 
                 case TextOrientation.BottomLeft:
                     x = Position.X + Padding;
-                    y = Position.Y + Size.Y - Padding;
+                    y = Position.Y + Size.Y - Padding - fe.Descent;
                     break;
 
                 case TextOrientation.BottomCenter:
                     x = Position.X + (Size.X - te.Width) / 2;
-                    y = Position.Y + Size.Y - Padding;
+                    y = Position.Y + Size.Y - Padding - fe.Descent;
                     break;
 
                 case TextOrientation.BottomRight:
                     x = Position.X + Size.X - te.Width - Padding;
-                    y = Position.Y + Size.Y - Padding;
+                    y = Position.Y + Size.Y - Padding - fe.Descent;
                     break;
             }
 
@@ -273,8 +276,9 @@ namespace IS2Mod.ControlTypes
         {
             string[] words = Text.Split(' ');
             StringBuilder currentLine = new StringBuilder();
-            double baseY = FontSize * 0.8;
-            double currentY = Position.Y + Padding + baseY;
+            Cairo.FontExtents fe = ctx.FontExtents;
+            double baselineOffset = fe.Ascent;
+            double currentY = Position.Y + Padding + baselineOffset;
             double maxWidth = Size.X - (Padding * 2);
 
             foreach (string word in words)

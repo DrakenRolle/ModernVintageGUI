@@ -6,20 +6,16 @@ using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Vintagestory.API.Client;
+using Vintagestory.API.Util;
 
 namespace IS2Mod.ControlTypes
 {
     public abstract class UIControl : INotifyPropertyChanged
     {
-
-
-
-
-
         #region Events
         public event PropertyChangedEventHandler PropertyChanged;
         public event EventHandler OnAfterUIControllerBuilt;
-        
+
         public event EventHandler<MouseEventArgs> Clicked;
         public event EventHandler<MouseEventArgs> Enter;
         public event EventHandler<MouseEventArgs> Exit;
@@ -28,8 +24,6 @@ namespace IS2Mod.ControlTypes
         public event EventHandler<MouseEventArgs> MouseMove;
 
         public event EventHandler<Events.MouseWheelEventArgs> MouseWheel;
-
-
 
         public void InvokeEventClicked(MouseEvent vsArgs)
         {
@@ -157,6 +151,13 @@ namespace IS2Mod.ControlTypes
             set => SetProperty(ref _insideOrientation, value);
         }
 
+        private Orientation _orientation;
+        public Orientation Orientation
+        {
+            get => _orientation;
+            set => SetProperty(ref _orientation, value);
+        }
+
         private string _name;
         public string Name
         {
@@ -194,6 +195,7 @@ namespace IS2Mod.ControlTypes
             _padding = _Padding;
             _index = _Index;
             _insideOrientation = _Orientation;
+            _orientation = Orientation.Top; // Default child orientation
 
             if (_Size.HasValue)
             {
@@ -297,8 +299,9 @@ namespace IS2Mod.ControlTypes
                 PointD childSizeWithSpacing = GetChildSizeWithSpacing(child, childSize);
                 calculatedSize = MergeSizeByOrientation(childSizeWithSpacing, calculatedSize);
             }
-
+            var padding = this.Padding * 2;
             // Store calculated size before any constraints
+            calculatedSize = new PointD(calculatedSize.X+ padding, calculatedSize.Y+ padding);
             _calculatedSize = calculatedSize;
 
             // Update size if auto-sizing
@@ -307,12 +310,9 @@ namespace IS2Mod.ControlTypes
                 Size = calculatedSize;
             }
 
-            // Second pass: Normalize children based on parent's available space
-            // This must happen AFTER the parent knows its own size
-            NormalizeChildrenByDelta();
-
             return calculatedSize;
         }
+
 
         /// <summary>
         /// Normalizes children sizes based on delta division of parent's available space.
@@ -321,7 +321,7 @@ namespace IS2Mod.ControlTypes
         /// - None orientation: No normalization
         /// This is applied recursively to all descendants.
         /// </summary>
-        public void NormalizeChildrenByDelta()
+        public virtual void NormalizeChildrenByDelta()
         {
             if (Children.Count == 0)
                 return;
@@ -337,13 +337,11 @@ namespace IS2Mod.ControlTypes
                     // Vertical stacking: normalize width across all children
                     NormalizeChildrenWidth(availableWidth);
                     break;
-
                 case Orientation.Left:
                 case Orientation.Right:
                     // Horizontal stacking: normalize height across all children
                     NormalizeChildrenHeight(availableHeight);
                     break;
-
                 case Orientation.None:
                     // No normalization for overlay mode
                     break;
@@ -373,6 +371,10 @@ namespace IS2Mod.ControlTypes
                 // Update child size while preserving height
                 child.Size = new PointD(childAvailableWidth, child.Size.Y);
                 child._calculatedSize = new PointD(childAvailableWidth, child._calculatedSize.Y);
+                if (child.Children.Count > 0)
+                {
+                    child.NormalizeChildrenByDelta();
+                }
             }
         }
 
@@ -393,6 +395,10 @@ namespace IS2Mod.ControlTypes
                 // Update child size while preserving width
                 child.Size = new PointD(child.Size.X, childAvailableHeight);
                 child._calculatedSize = new PointD(child._calculatedSize.X, childAvailableHeight);
+                if (child.Children.Count > 0)
+                {
+                    child.NormalizeChildrenByDelta();
+                }
             }
         }
 
@@ -402,11 +408,11 @@ namespace IS2Mod.ControlTypes
         private PointD GetChildSizeWithSpacing(UIControl child, PointD childSize)
         {
             double totalMargin = 2 * child.Margin;
-            double totalPadding = 2 * this.Padding;
+            //double totalPadding = 2 * this.Padding;
 
             return new PointD(
-                childSize.X + totalMargin + totalPadding,
-                childSize.Y + totalMargin + totalPadding
+                childSize.X + totalMargin /*+ totalPadding*/,
+                childSize.Y + totalMargin /*+ totalPadding*/
             );
         }
 
@@ -463,13 +469,16 @@ namespace IS2Mod.ControlTypes
                 Children[i].CalculatePosition(previousSibling);
                 Children[i].CalculateAllPositions();
             }
+
+            // Normalize children after positions are calculated
+            NormalizeChildrenByDelta();
         }
 
         /// <summary>
-        /// Calculates the position of this control relative to its parent and siblings.
-        /// Also applies clipping if the control extends beyond parent bounds.
+        /// FIXED: Calculates the position of this control relative to its parent and siblings.
+        /// Now correctly handles Orientation.Right to position on the right side.
         /// </summary>
-        private void CalculatePosition(UIControl previousSibling)
+        public void CalculatePosition(UIControl previousSibling)
         {
             if (Parent == null)
             {
@@ -480,6 +489,18 @@ namespace IS2Mod.ControlTypes
             // Calculate base position with parent padding and own margin
             double posX = Parent.Position.X + Parent.Padding + Margin;
             double posY = Parent.Position.Y + Parent.Padding + Margin;
+
+            // FIXED: Handle Orientation.Right - position from the right edge
+            if (Orientation == Orientation.Right)
+            {
+                posX = Parent.Position.X + Parent.Size.X - Size.X - Margin - Parent.Padding;
+            }
+
+            // FIXED: Handle Orientation.Bottom - position from the bottom edge
+            if (Orientation == Orientation.Bottom)
+            {
+                posY = Parent.Position.Y + Parent.Size.Y - Size.Y - Margin - Parent.Padding;
+            }
 
             // Adjust position based on previous sibling and parent orientation
             if (previousSibling != null)
@@ -497,7 +518,6 @@ namespace IS2Mod.ControlTypes
                         // Stack horizontally - add to X, keep Y
                         posX = previousSibling.Position.X + previousSibling.Size.X + previousSibling.Margin + Margin;
                         break;
-
                     case Orientation.None:
                         // Overlay - use parent position (already set above)
                         break;
@@ -528,17 +548,18 @@ namespace IS2Mod.ControlTypes
             double parentMaxY = Parent.Position.Y + Parent.Size.Y - Parent.Padding;
 
             // Start with calculated size
-            double clippedWidth = _calculatedSize.X;
-            double clippedHeight = _calculatedSize.Y;
+            double clippedWidth = Size.X;
+            double clippedHeight = Size.Y;
 
-            // Clip right edge
-            if (proposedX + _calculatedSize.X > parentMaxX)
+            // Only clip if control starts outside bounds or extends significantly beyond
+            // Don't clip right edge if control fits within reasonable margin tolerance
+            if (proposedX + _calculatedSize.X > parentMaxX + Margin)
             {
                 clippedWidth = Math.Max(0, parentMaxX - proposedX);
             }
 
-            // Clip bottom edge
-            if (proposedY + _calculatedSize.Y > parentMaxY)
+            // Only clip bottom edge if control extends significantly beyond
+            if (proposedY + _calculatedSize.Y > parentMaxY + Margin)
             {
                 clippedHeight = Math.Max(0, parentMaxY - proposedY);
             }
@@ -558,7 +579,6 @@ namespace IS2Mod.ControlTypes
             return new PointD(clippedWidth, clippedHeight);
         }
         #endregion
-        // Fixed Hit Detection for UIControl - handles nested children correctly
 
         #region Hit Detection
         /// <summary>
@@ -570,17 +590,15 @@ namespace IS2Mod.ControlTypes
         /// <returns>The deepest control at the given position, or null if none found</returns>
         protected UIControl HitTest(int screenX, int screenY)
         {
-            // First check if we're even inside the dialog bounds
             if (!IsPointInDialog(screenX, screenY))
             {
                 return null;
             }
 
-            // Convert screen coordinates to dialog-relative coordinates
+            // Convert screen coords to dialog-relative
             double relativeX = screenX - Position.X;
             double relativeY = screenY - Position.Y;
 
-            // Recursively search for the deepest control at this position
             return HitTestRecursive(this, relativeX, relativeY);
         }
 
@@ -594,71 +612,43 @@ namespace IS2Mod.ControlTypes
                    screenY >= Position.Y &&
                    screenY <= Position.Y + Size.Y;
         }
-
         /// <summary>
         /// Recursively searches the control hierarchy to find the deepest control at the given position.
         /// Returns the most specific (deepest) control, preferring children over parents.
         /// Coordinates are relative to the current control's parent.
         /// </summary>
-        protected virtual UIControl HitTestRecursive(UIControl control, double relativeX, double relativeY)
+        protected virtual UIControl HitTestRecursive(UIControl control, double parentRelativeX, double parentRelativeY)
         {
-            // Special case: if this is the dialog itself (root), coordinates are already relative to it
-            // So we check against position (0, 0) for the dialog
-            bool isDialog = control == this;
+            UIControl mostFittingChild = null;
 
-            if (isDialog)
+            foreach (var item in control.Children)
             {
-                // For dialog, just check if the relative coordinates are within bounds (starting at 0,0)
-                if (relativeX < 0 || relativeX > control.Size.X || relativeY < 0 || relativeY > control.Size.Y)
+                var found = item.HitTestRecursive(item, parentRelativeX, parentRelativeY);
+                if (found != null)
                 {
-                    return null;
-                }
-            }
-            else
-            {
-                // For children, check if point is within this control's bounds
-                if (!IsPointInControl(control, relativeX, relativeY))
-                {
-                    return null;
+                    mostFittingChild = found;
+                    break;
                 }
             }
 
-            // Check children first (from front to back, deepest first)
-            // Iterate in reverse order so controls rendered on top are checked first
-            for (int i = control.Children.Count - 1; i >= 0; i--)
+            if (mostFittingChild == null && IsPointInDialog((int)parentRelativeX, (int)parentRelativeY))
             {
-                UIControl child = control.Children[i];
-
-                // Convert coordinates to be relative to the child
-                // If this is the dialog, relativeX/Y are already relative to dialog (0,0)
-                // Otherwise, we need to subtract the current control's position
-                double childRelativeX = isDialog ? relativeX - child.Position.X : relativeX - child.Position.X;
-                double childRelativeY = isDialog ? relativeY - child.Position.Y : relativeY - child.Position.Y;
-
-                UIControl hitChild = child.HitTestRecursive(child, childRelativeX, childRelativeY);
-
-                if (hitChild != null)
-                {
-                    // Found a child that contains the point
-                    return hitChild;
-                }
+                mostFittingChild = control;
             }
 
-            // No children contain the point, so this control is the hit target
-            // Don't return the dialog itself as a hit target
-            return isDialog ? null : control;
+            return mostFittingChild;
         }
 
         /// <summary>
         /// Checks if a point is within a control's bounds.
         /// The point coordinates are relative to the control's parent.
         /// </summary>
-        protected bool IsPointInControl(UIControl control, double relativeX, double relativeY)
+        protected bool IsPointInControlAbsolute(UIControl control, double screenX, double screenY)
         {
-            return relativeX >= control.Position.X &&
-                   relativeX <= control.Position.X + control.Size.X &&
-                   relativeY >= control.Position.Y &&
-                   relativeY <= control.Position.Y + control.Size.Y;
+            return screenX >= control.Position.X &&
+                   screenX <= control.Position.X + control.Size.X &&
+                   screenY >= control.Position.Y &&
+                   screenY <= control.Position.Y + control.Size.Y;
         }
         #endregion
 

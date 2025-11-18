@@ -27,7 +27,13 @@ namespace IS2Mod.ControlTypes
             B = b;
             A = a;
         }
-
+        public ElementColor(double r, double g, double b, double a)
+        {
+            R = (byte)(r * 255);
+            G = (byte)(g * 255);
+            B = (byte)(b * 255);
+            A = (byte)(a * 255);
+        }
         public ElementColor(double[] colors)
         {
             double r = colors.Length > 0 ? colors[0] : 1.0;
@@ -62,6 +68,10 @@ namespace IS2Mod.ControlTypes
         public ElementColor BackgroundColor { get; set; }
         public SurfacePattern Pattern { get; set; }
         public RectangleBorderStyle[] HiddenBorders { get; set; }
+
+        // NEW: Blur properties for Gaussian blur effect
+        public double BlurRange { get; set; }
+        public int BlurEdgeWidth { get; set; }
         #endregion
 
         #region Constructors
@@ -72,6 +82,8 @@ namespace IS2Mod.ControlTypes
             ElementColor backgroundColor = null,
             SurfacePattern pattern = null,
             RectangleBorderStyle[] hiddenBorders = null,
+            double blurRange = 0,
+            int blurEdgeWidth = 0,
             string _Name = "",
             PointD? _Size = null,
             Orientation _Orientation = Orientation.Top,
@@ -86,10 +98,8 @@ namespace IS2Mod.ControlTypes
             BackgroundColor = backgroundColor ?? ElementColor.Transparent;
             Pattern = pattern;
             HiddenBorders = hiddenBorders ?? Array.Empty<RectangleBorderStyle>();
-
-            // Set padding to border width to prevent border overlap in nested rectangles
-            // If explicit padding is needed, add it after construction or use margin on children
-            Padding = BorderWidth;
+            BlurRange = blurRange;
+            BlurEdgeWidth = blurEdgeWidth;
         }
 
         public RectangleControl() : base()
@@ -99,6 +109,8 @@ namespace IS2Mod.ControlTypes
             BorderColor = ElementColor.Transparent;
             BackgroundColor = ElementColor.Transparent;
             HiddenBorders = Array.Empty<RectangleBorderStyle>();
+            BlurRange = 0;
+            BlurEdgeWidth = 0;
             Padding = BorderWidth;
         }
         #endregion
@@ -113,6 +125,7 @@ namespace IS2Mod.ControlTypes
         #region Rendering
         public override void GenerateRenderData(ImageSurface surface, Context ctx)
         {
+            // Render borders first
             if (RoundedCorners == 0)
             {
                 RenderSquareBorders(ctx);
@@ -124,8 +137,58 @@ namespace IS2Mod.ControlTypes
 
             RenderBackground(ctx);
 
+            // NEW: Apply Gaussian blur to borders if enabled
+            if (BlurRange > 0 && BlurEdgeWidth > 0)
+            {
+                ApplyBlurToBorders(surface);
+            }
+
             // Render children
             base.GenerateRenderData(surface, ctx);
+        }
+
+        // NEW: Apply Gaussian blur to border edges using SurfaceTransformBlur.BlurPartial
+        private void ApplyBlurToBorders(ImageSurface surface)
+        {
+            int x = (int)Position.X;
+            int y = (int)Position.Y;
+            int width = (int)Size.X;
+            int height = (int)Size.Y;
+
+            // Ensure coordinates are within surface bounds
+            int surfaceWidth = surface.Width;
+            int surfaceHeight = surface.Height;
+
+            if (x < 0 || y < 0 || x + width > surfaceWidth || y + height > surfaceHeight)
+            {
+                // Clamp to surface bounds
+                x = Math.Max(0, x);
+                y = Math.Max(0, y);
+                width = Math.Min(width, surfaceWidth - x);
+                height = Math.Min(height, surfaceHeight - y);
+            }
+
+            // Apply blur only to the border edges
+            if (width > 0 && height > 0)
+            {
+                try
+                {
+                    SurfaceTransformBlur.BlurPartial(
+                        surface,
+                        BlurRange,
+                        BlurEdgeWidth,
+                        x,
+                        y,
+                        x + width,
+                        y + height
+                    );
+                }
+                catch (Exception ex)
+                {
+                    // Handle any blur errors gracefully
+                    System.Diagnostics.Debug.WriteLine($"Blur failed: {ex.Message}");
+                }
+            }
         }
 
         private void RenderSquareBorders(Context ctx)

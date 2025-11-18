@@ -31,7 +31,7 @@ namespace IS2Mod.ControlTypes.Custom
             ICoreClientAPI capi,
             string _DialogName,
             string _Title = "")
-            : base(_Orientation: Orientation.Top, _Margin: 10, _Padding: 10)
+            : base(_Orientation: Orientation.Top, _Margin: 0, _Padding: 10)
         {
             Dialog = this;
             DialogName = _DialogName;
@@ -46,6 +46,16 @@ namespace IS2Mod.ControlTypes.Custom
         #endregion
 
         #region Renderer Management
+        public override void InitializeComponents()
+        {
+            RectangleControl control = new RectangleControl
+            {
+                BackgroundColor = new ElementColor(0, 0, 0, 0.5),
+                BorderColor = new ElementColor(1, 1, 1, 0.2),
+                BorderWidth = 2,
+                RoundedCorners = 10
+            };
+        }
         private void RegisterRenderer()
         {
             _renderer = new CustomUIRenderer(Api, this);
@@ -104,6 +114,9 @@ namespace IS2Mod.ControlTypes.Custom
                 GuiStyle.DialogBGRadius
             );
 
+
+
+
             // Fill with background color
             context.SetSourceRGBA(
                 GuiStyle.DialogStrongBgColor[0],
@@ -149,7 +162,7 @@ namespace IS2Mod.ControlTypes.Custom
 
             // Calculate layout (must happen after hierarchy is set up)
             CalculateSize();
-
+            NormalizeChildrenByDelta();
             CalculateAllPositions();
             // Center on screen (after size is known)
             CenterOnScreen();
@@ -227,6 +240,7 @@ namespace IS2Mod.ControlTypes.Custom
             {
                 pressedControl = clickedControl;
                 clickedControl.InvokeEventMouseDown(e);
+                e.Handled = true;
             }
             else
             {
@@ -243,12 +257,14 @@ namespace IS2Mod.ControlTypes.Custom
             if (releasedControl != null)
             {
                 releasedControl.InvokeEventMouseUp(e);
+                e.Handled = true;
             }
 
             // Check if this is a complete click (mouse down and up on same control)
             if (pressedControl != null && releasedControl == pressedControl)
             {
                 pressedControl.InvokeEventClicked(e);
+                e.Handled = true;
             }
 
             // Clear pressed state
@@ -282,6 +298,7 @@ namespace IS2Mod.ControlTypes.Custom
             if (currentlyHovered != null)
             {
                 currentlyHovered.InvokeEventMouseMove(e);
+                e.Handled = true;
             }
         }
 
@@ -291,6 +308,7 @@ namespace IS2Mod.ControlTypes.Custom
             if (currentlyHovered != null)
             {
                 currentlyHovered.InvokeEventMouseWheel(e);
+                e.SetHandled(true);
             }
         }
         #endregion
