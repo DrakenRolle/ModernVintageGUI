@@ -139,6 +139,7 @@ namespace LayoutHarness
             yield return ("readme-title-bar", BuildTitleBar());
             yield return ("readme-context-menu", BuildContextMenu(hovered: false));
             yield return ("readme-context-menu-hover", BuildContextMenu(hovered: true));
+            yield return ("readme-keyboard-focus", BuildKeyboardFocus());
             yield return ("readme-runtime-before", BuildRuntimeEdit(added: false));
             yield return ("readme-runtime-after", BuildRuntimeEdit(added: true));
         }
@@ -192,6 +193,32 @@ namespace LayoutHarness
             // Drive the real hover handler rather than poking at the visuals, so the picture
             // shows whatever the control actually does on Enter.
             save.InvokeEventEnter(new MouseEvent(0, 0));
+
+            return root;
+        }
+
+        /// <summary>
+        /// Hover and keyboard focus side by side. Same approach as the hover picture: the real
+        /// handlers are driven, so this is what the control does rather than what it is meant to.
+        /// </summary>
+        private static UIControl BuildKeyboardFocus()
+        {
+            RectangleControl root = CreateDialogRoot();
+
+            var plain = new ButtonControl(_Name: "plainButton");
+            plain.Text = "Save";
+            root.Children.Add(plain);
+
+            var focused = new ButtonControl(_Name: "focusedButton");
+            focused.Text = "Tabbed to";
+            root.Children.Add(focused);
+
+            var hovered = new ButtonControl(_Name: "hoveredButton");
+            hovered.Text = "Hovered";
+            root.Children.Add(hovered);
+
+            focused.InvokeGotFocus();
+            hovered.InvokeEventEnter(new MouseEvent(0, 0));
 
             return root;
         }

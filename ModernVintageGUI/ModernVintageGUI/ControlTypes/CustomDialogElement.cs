@@ -60,6 +60,15 @@ namespace IS2Mod.ControlTypes.Custom
         /// click outside never reaches this dialog through the normal event path.
         /// </summary>
         public bool CloseOnOutsideClick { get; set; }
+
+        /// <summary>
+        /// Close this dialog when Escape is pressed while it owns the keyboard. Turn it off for
+        /// a dialog the player must dismiss deliberately.
+        ///
+        /// With this off the key is not consumed either, so Escape falls through to the game and
+        /// opens the pause menu - the same thing it does when no dialog of ours is focused.
+        /// </summary>
+        public bool CloseOnEscape { get; set; } = true;
         #endregion
 
         #region Private Fields
@@ -242,6 +251,11 @@ namespace IS2Mod.ControlTypes.Custom
             pressedControl = null;
             ReleaseMouseCapture();
 
+            // Same reasoning for the keyboard: a control paints its own focus ring and only
+            // removes it on LostFocus, so a dialog closed while something was focused would come
+            // back with a stale ring on it.
+            FocusControl(null);
+
             // No need to re-grab the mouse by hand: once no dialog is registered any more the
             // patch stops interfering and UpdateFreeMouse restores the vanilla state on its own.
             UIManager.Current?.UnregisterDialog(this);
@@ -379,6 +393,15 @@ namespace IS2Mod.ControlTypes.Custom
             UIControl? clickedControl = HitTest(e.X, e.Y);
             pressedControl = clickedControl;
 
+            // Clicking a focusable control gives it the keyboard, the way every desktop UI
+            // does it. Clicking anything else - the background, the title bar - deliberately
+            // leaves focus where it was instead of clearing it, so dragging a dialog around
+            // does not cost the player their place in the tab order.
+            if (clickedControl != null && clickedControl.IsFocusable)
+            {
+                FocusControl(clickedControl);
+            }
+
             clickedControl?.InvokeEventMouseDown(e);
 
             if (clickedControl != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
@@ -508,6 +531,135 @@ namespace IS2Mod.ControlTypes.Custom
             {
                 currentlyHovered.InvokeEventMouseWheel(e);
                 e.SetHandled(true);
+            }
+        }
+        #endregion
+
+        #region Keyboard Handling
+        /// <summary>
+        /// The control inside this dialog that receives keys, or null when none does. Set by
+        /// clicking a focusable control and by Tab; see <see cref="FocusControl"/>.
+        /// </summary>
+        public UIControl? FocusedControl { get; private set; }
+
+        /// <summary>
+        /// Moves the keyboard focus, raising LostFocus on the old control and GotFocus on the
+        /// new one. Pass null to take focus away from everything.
+        /// </summary>
+        public void FocusControl(UIControl? control)
+        {
+            if (ReferenceEquals(FocusedControl, control))
+                return;
+
+            UIControl? previous = FocusedControl;
+
+            // Assign before raising, so a handler that asks the dialog what is focused during
+            // the switch sees the new state rather than a half applied one.
+            FocusedControl = control;
+
+            if (previous != null)
+            {
+                previous.HasKeyboardFocus = false;
+                previous.InvokeLostFocus();
+            }
+
+            if (control != null)
+            {
+                control.HasKeyboardFocus = true;
+                control.InvokeGotFocus();
+            }
+
+            Refresh();
+        }
+
+        /// <summary>
+        /// Moves focus to the next focusable control, or the previous one for Shift+Tab.
+        /// </summary>
+        /// <returns>false when the dialog has nothing focusable, so the caller can let the key
+        /// through instead of swallowing it for no effect.</returns>
+        public bool MoveFocus(bool backwards)
+        {
+            UIControl? next = NextFocusable(this, FocusedControl, backwards);
+            if (next == null)
+                return false;
+
+            FocusControl(next);
+            return true;
+        }
+
+        /// <summary>
+        /// Routes a key press: first to the focused control, then to the dialog's own bindings.
+        ///
+        /// Only keys that actually did something are marked handled. That is not politeness, it
+        /// is required: <see cref="Input.UIManager"/> is called from ClientMain before the
+        /// vanilla hotkey manager runs, so consuming a key we have no use for would stop the
+        /// player from opening their inventory while this dialog is focused.
+        /// </summary>
+        public void HandleKeyDown(Events.KeyEventArgs e)
+        {
+            if (!IsVisible)
+                return;
+
+            FocusedControl?.InvokeEventKeyDown(e);
+            if (e.Handled)
+                return;
+
+            // A control that takes over the keyboard - a text field - keeps everything else the
+            // dialog would otherwise interpret, except Escape, which has to stay a way out.
+            if (FocusedControl?.WantsAllKeyboardInput == true && e.Key != GlKeys.Escape)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            switch (e.Key)
+            {
+                case GlKeys.Escape:
+                    if (!CloseOnEscape)
+                        break;
+
+                    Hide();
+                    e.Handled = true;
+                    break;
+
+                case GlKeys.Tab:
+                    e.Handled = MoveFocus(backwards: e.ShiftPressed);
+                    break;
+
+                // In a stacking layout the tab order runs down the dialog, so the arrow keys
+                // along that axis are the same movement and players expect them to work.
+                case GlKeys.Down:
+                    e.Handled = MoveFocus(backwards: false);
+                    break;
+
+                case GlKeys.Up:
+                    e.Handled = MoveFocus(backwards: true);
+                    break;
+
+                case GlKeys.Enter:
+                case GlKeys.KeypadEnter:
+                case GlKeys.Space:
+                    if (FocusedControl == null)
+                        break;
+
+                    FocusedControl.PerformClick();
+                    e.Handled = true;
+                    break;
+            }
+        }
+
+        public void HandleKeyUp(Events.KeyEventArgs e)
+        {
+            if (!IsVisible)
+                return;
+
+            FocusedControl?.InvokeEventKeyUp(e);
+
+            // Match the press: a key we consumed going down must be consumed coming up as well,
+            // otherwise the hotkey manager sees a release without a press.
+            if (!e.Handled && FocusedControl?.WantsAllKeyboardInput == true && e.Key != GlKeys.Escape)
+            {
+                e.Handled = true;
             }
         }
         #endregion

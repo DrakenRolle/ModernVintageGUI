@@ -48,6 +48,13 @@ namespace IS2Mod.Input
             _api.Event.MouseMove += OnMouseMove;
             _api.Event.MouseWheelMove += OnMouseWheel;
 
+            // ClientMain.OnKeyDown triggers these before the hotkey manager and before its own
+            // client systems, and returns as soon as Handled is set - the same property the
+            // mouse events have, and the reason we can close a dialog with Escape without the
+            // pause menu also opening.
+            _api.Event.KeyDown += OnKeyDown;
+            _api.Event.KeyUp += OnKeyUp;
+
             // Same setting the game watches to update RuntimeEnv.GUIScale and recompose its own
             // dialogs. ISettings has no RemoveWatcher, so this handler outlives the manager -
             // hence the disposed guard in it.
@@ -356,6 +363,61 @@ namespace IS2Mod.Input
         }
 
         /// <summary>
+        /// The dialog that currently owns the keyboard, or null when the game does.
+        ///
+        /// An open popup wins over everything: it is transient, it is drawn on top, and Escape
+        /// has to close it before it closes the dialog underneath. Deepest first, so Escape in a
+        /// cascade closes one sub menu per press rather than the whole chain at once.
+        ///
+        /// Otherwise it is the focused dialog - the same one that draws above the vanilla GUI.
+        /// With none of ours focused the player clicked a vanilla window or is looking at the
+        /// world, and the keyboard is not ours to take.
+        /// </summary>
+        private CustomDialogElement? KeyboardTarget()
+        {
+            foreach (CustomDialogElement dialog in DialogsTopMostFirst())
+            {
+                if (dialog.IsVisible && dialog.Layer == DialogRenderLayer.Overlay)
+                    return dialog;
+            }
+
+            foreach (CustomDialogElement dialog in DialogsTopMostFirst())
+            {
+                if (dialog.IsVisible && dialog.IsFocused)
+                    return dialog;
+            }
+
+            return null;
+        }
+
+        private void OnKeyDown(KeyEvent e)
+        {
+            CustomDialogElement? target = KeyboardTarget();
+            if (target == null)
+                return;
+
+            var args = new ControlTypes.Events.KeyEventArgs(e);
+            target.HandleKeyDown(args);
+
+            // Only copy a true back. Writing false would clear a flag somebody upstream set.
+            if (args.Handled)
+                e.Handled = true;
+        }
+
+        private void OnKeyUp(KeyEvent e)
+        {
+            CustomDialogElement? target = KeyboardTarget();
+            if (target == null)
+                return;
+
+            var args = new ControlTypes.Events.KeyEventArgs(e);
+            target.HandleKeyUp(args);
+
+            if (args.Handled)
+                e.Handled = true;
+        }
+
+        /// <summary>
         /// Forget any in-progress press so releasing the button over a vanilla dialog does not
         /// later complete as a click on one of our controls.
         /// </summary>
@@ -379,6 +441,8 @@ namespace IS2Mod.Input
             _api.Event.MouseUp -= OnMouseUp;
             _api.Event.MouseMove -= OnMouseMove;
             _api.Event.MouseWheelMove -= OnMouseWheel;
+            _api.Event.KeyDown -= OnKeyDown;
+            _api.Event.KeyUp -= OnKeyUp;
 
             _openDialogs.Clear();
             RequiresUngrabbedMouse = false;

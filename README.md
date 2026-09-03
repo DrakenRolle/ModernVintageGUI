@@ -38,6 +38,9 @@ interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for shor
   dialog instead of reaching the world, and block interaction is suppressed
 * **Focus driven z-order.** A focused dialog draws above the vanilla GUI and takes clicks in the
   overlap; an unfocused one goes back below it - the same rule the game applies to its own windows
+* **Keyboard focus.** Tab and the arrow keys walk the interactive controls in reading order, Enter
+  and Space activate the focused one, Escape closes the dialog. Only the keys that actually did
+  something are consumed, so the game stays playable with a dialog open
 * **Dynamic recomposing** after the UI was opened, so you can change and edit the UI as you like
   even if the dialog is already open
 * **Decoupled rendering.** The control tree draws itself onto a single Cairo surface which is
@@ -50,8 +53,9 @@ interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for shor
 
 <h2>What is still ongoing</h2>
 
-* Keyboard input and focus - there is no key handling at all yet, so no ESC to close and no text
-  input
+* Text input - `ClientMain.OnKeyPress`, the one carrying typed characters with the keyboard layout
+  applied, does not trigger anything on `IClientEventAPI`, so a text field needs a second Harmony
+  patch. Everything else about the keyboard works without one
 * `Orientation` (a control's own alignment) is inert, and `Orientation.Fill` is not implemented
 * Redraw invalidation - every hover state change currently recomposes the whole surface
 * Re-centering on window resize
@@ -134,6 +138,24 @@ dialog.Children.Add(row);
 Controls of different kinds mix freely in one row:
 
 <img src="docs/images/readme-mixed-row.png" alt="A button, a text label and another button in one row" />
+
+<h2>Keyboard</h2>
+
+Tab and the arrow keys move the focus, Enter and Space activate, Escape closes. Controls the
+player operates are in the tab order; decoration is not.
+
+```csharp
+var button = new ButtonControl { Text = "Save" };   // focusable already
+myPanel.IsFocusable = false;                        // and containers are not
+
+dialog.CloseOnEscape = false;                       // for a dialog that must be dismissed on purpose
+```
+
+<img src="docs/images/readme-keyboard-focus.png" alt="Three buttons: plain, focused with a ring, and hovered" />
+
+Hover and focus are separate states, so a control can be in both. Nothing is focused when a dialog
+opens, which means Enter and Space stay with the game until the player tabs into the dialog or
+clicks a control.
 
 <h2>Context menus</h2>
 

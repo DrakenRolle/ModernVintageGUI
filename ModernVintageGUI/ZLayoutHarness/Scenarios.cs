@@ -63,6 +63,15 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "keyboard-focus",
+                Description = "Three buttons, the middle one holding the keyboard focus and the "
+                            + "last one both focused and hovered - the ring and the hover look "
+                            + "are independent states and have to survive each other.",
+                Build = BuildKeyboardFocus
+            };
+
+            yield return new Scenario
+            {
                 Name = "stretched-label",
                 Description = "A label inside a vertically stacked panel. Normalization stretches " +
                               "it to the full content width; the next measure pass must still " +
@@ -204,6 +213,35 @@ namespace LayoutHarness
             RectangleControl stack = (RectangleControl)root.Children[0];
 
             ((ContextMenuItem)stack.Children[0]).InvokeEventEnter(new MouseEvent(0, 0));
+
+            return root;
+        }
+
+        /// <summary>
+        /// The focus states, produced by the real GotFocus and Enter handlers rather than by
+        /// setting colours by hand - so this renders whatever a focused button actually looks
+        /// like, and the scale checks cover the ring along with everything else.
+        /// </summary>
+        private static RectangleControl BuildKeyboardFocus()
+        {
+            RectangleControl root = CreateRoot();
+
+            var plain = new ButtonControl(_Name: "plain");
+            plain.Text = "Not focused";
+            root.Children.Add(plain);
+
+            var focused = new ButtonControl(_Name: "focused");
+            focused.Text = "Focused";
+            root.Children.Add(focused);
+
+            var both = new ButtonControl(_Name: "focusedAndHovered");
+            both.Text = "Focused and hovered";
+            root.Children.Add(both);
+
+            focused.InvokeGotFocus();
+
+            both.InvokeGotFocus();
+            both.InvokeEventEnter(new MouseEvent(0, 0));
 
             return root;
         }

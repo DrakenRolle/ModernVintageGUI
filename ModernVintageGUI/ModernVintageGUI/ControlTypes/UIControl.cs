@@ -3,6 +3,7 @@ using IS2Mod.ControlTypes.Custom;
 using IS2Mod.ControlTypes.Events;
 using IS2Mod.Enums;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Vintagestory.API.Client;
@@ -59,6 +60,63 @@ namespace IS2Mod.ControlTypes
         {
             var args = new Events.MouseWheelEventArgs(vsArgs);
             MouseWheel?.Invoke(this, args);
+        }
+
+        public event EventHandler<Events.KeyEventArgs>? KeyDown;
+        public event EventHandler<Events.KeyEventArgs>? KeyUp;
+
+        /// <summary>Raised when this control became the keyboard focus of its dialog.</summary>
+        public event EventHandler? GotFocus;
+
+        /// <summary>Raised when it lost that focus again.</summary>
+        public event EventHandler? LostFocus;
+
+        /// <summary>
+        /// Unlike the mouse invokers this takes the finished arguments rather than the game's
+        /// event: the same instance travels to every subscriber so that setting
+        /// <see cref="Events.KeyEventArgs.Handled"/> anywhere is seen by the dialog afterwards.
+        /// </summary>
+        public void InvokeEventKeyDown(Events.KeyEventArgs args)
+        {
+            KeyDown?.Invoke(this, args);
+        }
+
+        public void InvokeEventKeyUp(Events.KeyEventArgs args)
+        {
+            KeyUp?.Invoke(this, args);
+        }
+
+        /// <summary>
+        /// Raises the focus events. Public for the same reason the mouse invokers are: the
+        /// layout harness drives a control into a visual state and renders it, without a client.
+        /// Moving the focus in a dialog is <see cref="Custom.CustomDialogElement.FocusControl"/>,
+        /// which is what keeps <see cref="HasKeyboardFocus"/> in step with these.
+        /// </summary>
+        public void InvokeGotFocus()
+        {
+            GotFocus?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void InvokeLostFocus()
+        {
+            LostFocus?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Raises <see cref="Clicked"/> without a mouse, which is what Enter and Space on the
+        /// focused control do. The arguments carry the center of the control, so a handler that
+        /// looks at the coordinates - to place a context menu, say - still gets a sensible spot.
+        /// </summary>
+        public void PerformClick()
+        {
+            PointD screen = GetScreenPosition();
+
+            var args = new Events.MouseEventArgs(
+                (int)(screen.X + Size.X / 2),
+                (int)(screen.Y + Size.Y / 2),
+                Vintagestory.API.Common.EnumMouseButton.Left);
+
+            Clicked?.Invoke(this, args);
         }
 
         #endregion
@@ -231,6 +289,49 @@ namespace IS2Mod.ControlTypes
             get => _isStaticElement;
             set => SetProperty(ref _isStaticElement, value);
         }
+
+        private bool _isFocusable;
+        /// <summary>
+        /// Whether this control can take the keyboard focus of its dialog - by being clicked or
+        /// by being tabbed to. Off by default: decoration must never end up in the tab order.
+        ///
+        /// Set it on the control the user interacts with, not on its parts. A composite that
+        /// overrides <see cref="HitTestRecursive"/> to be atomic for the mouse should be atomic
+        /// for the keyboard as well, i.e. focusable itself with non focusable children.
+        /// </summary>
+        public bool IsFocusable
+        {
+            get => _isFocusable;
+            set => SetProperty(ref _isFocusable, value);
+        }
+
+        private bool _hasKeyboardFocus;
+        /// <summary>
+        /// Whether this control currently holds the keyboard focus of its dialog. Owned by
+        /// <see cref="Custom.CustomDialogElement.FocusControl"/>, which is also what raises
+        /// <see cref="GotFocus"/> and <see cref="LostFocus"/> - assigning it elsewhere would let
+        /// the two states drift apart.
+        ///
+        /// Note that this is the focus *within* a dialog. Whether the dialog itself is the one
+        /// receiving keys is <see cref="Custom.CustomDialogElement.IsFocused"/>.
+        /// </summary>
+        public bool HasKeyboardFocus
+        {
+            get => _hasKeyboardFocus;
+            internal set => SetProperty(ref _hasKeyboardFocus, value);
+        }
+
+        /// <summary>
+        /// Whether this control wants every key while it is focused, instead of only the ones
+        /// the dialog acts on itself.
+        ///
+        /// The default is false, and that is what keeps the game playable with a dialog open: we
+        /// are called before the vanilla hotkey manager, so consuming keys we do not use would
+        /// stop the player from opening their inventory. A text field would override this - and
+        /// would additionally need a Harmony patch on ClientMain.OnKeyPress, because typed
+        /// characters never reach the event API.
+        /// </summary>
+        public virtual bool WantsAllKeyboardInput => false;
 
         // Store the actual size before any clipping
         private PointD _calculatedSize;
@@ -758,6 +859,67 @@ namespace IS2Mod.ControlTypes
             }
 
             return control;
+        }
+        #endregion
+
+        #region Focus Traversal
+        /// <summary>
+        /// Every focusable control below <paramref name="root"/>, in tab order.
+        ///
+        /// Tab order is the order of the tree, depth first: a control comes before its children
+        /// and before its later siblings. In a stacking layout that is the same as reading the
+        /// dialog top to bottom, left to right, so there is nothing extra to maintain - moving a
+        /// control in the tree moves it in the tab order too.
+        ///
+        /// Static, and taking the root as a parameter, so the layout harness can check the order
+        /// without a dialog and therefore without the game.
+        /// </summary>
+        public static IEnumerable<UIControl> FocusableControls(UIControl root)
+        {
+            if (root == null)
+                yield break;
+
+            if (root.IsFocusable)
+                yield return root;
+
+            foreach (UIControl child in root.Children)
+            {
+                foreach (UIControl focusable in FocusableControls(child))
+                {
+                    yield return focusable;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The control Tab moves to, or Shift+Tab when <paramref name="backwards"/> is set.
+        /// Wraps around at the ends. With nothing focused yet it returns the first control -
+        /// the last one when going backwards - so the first Tab into a dialog lands sensibly.
+        /// Returns null when there is nothing focusable at all.
+        /// </summary>
+        public static UIControl? NextFocusable(UIControl root, UIControl? current, bool backwards)
+        {
+            List<UIControl> order = new List<UIControl>(FocusableControls(root));
+
+            if (order.Count == 0)
+                return null;
+
+            if (current == null)
+                return backwards ? order[order.Count - 1] : order[0];
+
+            int index = order.IndexOf(current);
+
+            // The focused control is no longer in the tree - it was removed while focused, or it
+            // belongs somewhere else entirely. Start over rather than getting stuck.
+            if (index < 0)
+                return backwards ? order[order.Count - 1] : order[0];
+
+            int next = backwards ? index - 1 : index + 1;
+
+            // Wrap. (index + count) keeps -1 from turning into a negative remainder.
+            next = (next + order.Count) % order.Count;
+
+            return order[next];
         }
         #endregion
 

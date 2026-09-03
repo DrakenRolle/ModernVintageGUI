@@ -445,9 +445,15 @@ namespace ModernVintageGUI.ControlTypes
             Children.Add(_hoverFill);
             Children.Add(_label);
 
+            // Entries are what a menu is operated with, so they carry the keyboard focus of the
+            // popup: Tab and the arrow keys walk them, Enter picks one, Escape closes the menu.
+            IsFocusable = true;
+
             Enter += OnEnter;
             Exit += OnExit;
             Clicked += OnClicked;
+            GotFocus += OnGotFocus;
+            LostFocus += OnLostFocus;
         }
 
         private static ElementColor HoverColor(double alpha)
@@ -519,16 +525,48 @@ namespace ModernVintageGUI.ControlTypes
         #endregion
 
         #region Interaction
+        /// <summary>
+        /// A menu entry has one highlight but two ways of being singled out, and it can be in
+        /// both at once - so they are tracked separately and the row is lit when either holds.
+        /// Letting Enter and Exit write the colour directly would mean the mouse leaving an
+        /// entry unlights the one the keyboard is sitting on.
+        /// </summary>
+        private bool _isHovered;
+        private bool _isFocusHighlighted;
+
+        private void UpdateHighlight()
+        {
+            _hoverFill.BackgroundColor = HoverColor(_isHovered || _isFocusHighlighted ? HoverAlpha : 0.0);
+            Dialog?.Refresh();
+        }
+
         private void OnEnter(object? sender, MouseEventArgs e)
         {
-            _hoverFill.BackgroundColor = HoverColor(HoverAlpha);
-            Dialog?.Refresh();
+            _isHovered = true;
+            UpdateHighlight();
+
+            // Hovering also moves the keyboard selection, the way menus work everywhere. Without
+            // it the two could point at different entries, and Enter would pick the one the
+            // player is not looking at.
+            Dialog?.FocusControl(this);
         }
 
         private void OnExit(object? sender, MouseEventArgs e)
         {
-            _hoverFill.BackgroundColor = HoverColor(0.0);
-            Dialog?.Refresh();
+            _isHovered = false;
+            UpdateHighlight();
+        }
+
+        private void OnGotFocus(object? sender, EventArgs e)
+        {
+            _isFocusHighlighted = true;
+            UpdateHighlight();
+        }
+
+        private void OnLostFocus(object? sender, EventArgs e)
+        {
+            _isFocusHighlighted = false;
+            UpdateHighlight();
         }
 
         /// <summary>

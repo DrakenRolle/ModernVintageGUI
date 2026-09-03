@@ -11,8 +11,12 @@ namespace IS2Mod.ControlTypes
         private readonly RectangleControl _border = CreateBorder();
         private readonly RectangleControl _borderTop = CreateBorderTop();
         private readonly RectangleControl _borderBottom = CreateBorderBottom();
+        private readonly RectangleControl _focusRing = CreateFocusRing();
 
         private readonly TextLabelControl _textLabel = CreateTextLabel();
+
+        /// <summary>Alpha of the focus ring while the button holds the keyboard focus.</summary>
+        private const double FocusRingAlpha = 0.85;
 
         public string Text
         {
@@ -62,6 +66,31 @@ namespace IS2Mod.ControlTypes
             );
         }
 
+        /// <summary>
+        /// The ring that shows which control the keyboard is on. Drawn in the game's own
+        /// highlight colour so it reads as "selected" rather than as another border, and fully
+        /// transparent until the button is focused.
+        ///
+        /// It is a separate overlay rather than a change to the existing borders on purpose:
+        /// hover and focus are independent states and a button can be in both at once, so they
+        /// must not write to the same colour.
+        /// </summary>
+        private static RectangleControl CreateFocusRing()
+        {
+            return new RectangleControl(
+                borderWidth: 2,
+                borderColor: FocusRingColor(0.0),
+                _Margin: 0,
+                _Orientation: Orientation.None);
+        }
+
+        private static ElementColor FocusRingColor(double alpha)
+        {
+            var color = new ElementColor(GuiStyle.DialogHighlightColor);
+            color.A = (byte)(alpha * 255);
+            return color;
+        }
+
         // Create text label - will auto-size initially, then fill border
         private static TextLabelControl CreateTextLabel()
         {
@@ -91,11 +120,33 @@ namespace IS2Mod.ControlTypes
             _border.Children.Add(_borderBottom);
             _border.Children.Add(_textLabel);
 
+            // Last, so the ring is drawn over the emboss and the label instead of under them.
+            _border.Children.Add(_focusRing);
+
+            // A button is something the player operates, so it belongs in the tab order. Its
+            // parts do not - they stay non focusable, which is what makes Tab land on the button
+            // itself and Enter reach the Clicked handler a caller subscribed to.
+            IsFocusable = true;
+
             this.Clicked += ButtonControl_Clicked;
             this.Enter += ButtonControl_Enter;
             this.Exit += ButtonControl_Exit;
             this.MouseDown += ButtonControl_MouseDown;
             this.MouseUp += ButtonControl_MouseUp;
+            this.GotFocus += ButtonControl_GotFocus;
+            this.LostFocus += ButtonControl_LostFocus;
+        }
+
+        private void ButtonControl_GotFocus(object? sender, System.EventArgs e)
+        {
+            _focusRing.BorderColor = FocusRingColor(FocusRingAlpha);
+            Dialog?.Refresh();
+        }
+
+        private void ButtonControl_LostFocus(object? sender, System.EventArgs e)
+        {
+            _focusRing.BorderColor = FocusRingColor(0.0);
+            Dialog?.Refresh();
         }
 
         private void ButtonControl_MouseUp(object? sender, Events.MouseEventArgs e)
@@ -184,6 +235,7 @@ namespace IS2Mod.ControlTypes
                 _textLabel.IsAutoSize = false;
                 _borderTop.SetLayoutSize(this.Size);
                 _borderBottom.SetLayoutSize(this.Size);
+                _focusRing.SetLayoutSize(this.Size);
             }
             return size;
         }
@@ -197,12 +249,14 @@ namespace IS2Mod.ControlTypes
                 _textLabel.SetLayoutSize(this.Size);
                 _borderTop.SetLayoutSize(this.Size);
                 _borderBottom.SetLayoutSize(this.Size);
+                _focusRing.SetLayoutSize(this.Size);
 
                 // Force all positions to match border position (overlay)
                 _border.Position = this.Position;
                 _textLabel.Position = _border.Position;
                 _borderTop.Position = _border.Position;
                 _borderBottom.Position = _border.Position;
+                _focusRing.Position = _border.Position;
             }
             base.NormalizeChildrenByDelta();
         }
@@ -225,6 +279,9 @@ namespace IS2Mod.ControlTypes
 
                 _borderBottom.SetLayoutSize(this.Size);
                 _borderBottom.Position = _border.Position;
+
+                _focusRing.SetLayoutSize(this.Size);
+                _focusRing.Position = _border.Position;
             }
         }
 

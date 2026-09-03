@@ -77,6 +77,7 @@ namespace LayoutHarness
             }
 
             CheckContextMenuAnchorIsFree(failures);
+            CheckFocusOrder(failures);
 
             Console.WriteLine();
 
@@ -283,6 +284,126 @@ namespace LayoutHarness
             Console.WriteLine(
                 $"  host {plain.Size.X:0.##}x{plain.Size.Y:0.##} without menu, " +
                 $"{withMenu.Size.X:0.##}x{withMenu.Size.Y:0.##} with");
+        }
+
+        /// <summary>
+        /// The keyboard focus contract: which controls are in the tab order, in what order, and
+        /// that moving through it is a proper cycle in both directions.
+        ///
+        /// Worth checking headlessly because the failure modes are silent in the game - a
+        /// decoration that became focusable just makes Tab stop on an invisible rectangle, and a
+        /// composite that ended up in the wrong place in the tree makes Tab jump around the
+        /// dialog without anything looking broken.
+        /// </summary>
+        private static void CheckFocusOrder(List<string> failures)
+        {
+            Console.WriteLine("### focus order");
+            Console.WriteLine("Tab has to walk the interactive controls in reading order, and only those.");
+            Console.WriteLine();
+
+            var root = new RectangleControl(_Name: "root");
+            root.InsideOrientation = Orientation.Top;
+            root.Padding = 10;
+
+            var first = new ButtonControl(_Name: "first");
+            first.Text = "First";
+            root.Children.Add(first);
+
+            // Not interactive, so it must not appear in the tab order.
+            root.Children.Add(new TextLabelControl("Just a caption", _Name: "caption"));
+
+            var row = new RectangleControl(_Name: "row");
+            row.InsideOrientation = Orientation.Left;
+            foreach (string caption in new[] { "left", "middle", "right" })
+            {
+                var button = new ButtonControl(_Name: caption);
+                button.Text = caption;
+                row.Children.Add(button);
+            }
+            root.Children.Add(row);
+
+            var last = new ButtonControl(_Name: "last");
+            last.Text = "Last";
+            root.Children.Add(last);
+
+            root.PerformLayout();
+
+            List<UIControl> order = UIControl.FocusableControls(root).ToList();
+
+            string[] expected = { "first", "left", "middle", "right", "last" };
+            string[] actual = order.Select(c => c.Name).ToArray();
+
+            if (!actual.SequenceEqual(expected))
+            {
+                failures.Add(
+                    "[focus order] expected " + string.Join(", ", expected) +
+                    " but got " + (actual.Length == 0 ? "nothing" : string.Join(", ", actual)));
+
+                Console.WriteLine("  WRONG TAB ORDER: " + string.Join(", ", actual));
+                return;
+            }
+
+            Console.WriteLine("  tab order: " + string.Join(" -> ", actual));
+
+            // Reading order: each control starts at or below its predecessor, and on the same
+            // line it starts at or to the right of it. This is what ties the tab order to what
+            // the player actually sees, rather than only to the shape of the tree.
+            for (int i = 0; i < order.Count - 1; i++)
+            {
+                UIControl a = order[i];
+                UIControl b = order[i + 1];
+
+                bool sameLine = Math.Abs(a.Position.Y - b.Position.Y) < 1.0;
+                bool inOrder = sameLine ? b.Position.X >= a.Position.X - 0.001 : b.Position.Y > a.Position.Y;
+
+                if (inOrder)
+                    continue;
+
+                failures.Add(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "[focus order] '{0}' at {1:0.##}/{2:0.##} is tabbed to before '{3}' at {4:0.##}/{5:0.##}, " +
+                    "which is not reading order",
+                    a.Name, a.Position.X, a.Position.Y, b.Name, b.Position.X, b.Position.Y));
+            }
+
+            // Tab from every control has to land on the next one and wrap at the end, and
+            // Shift+Tab has to undo exactly that. A broken wrap traps the focus at one end.
+            for (int i = 0; i < order.Count; i++)
+            {
+                UIControl current = order[i];
+                UIControl expectedNext = order[(i + 1) % order.Count];
+                UIControl expectedPrevious = order[(i - 1 + order.Count) % order.Count];
+
+                UIControl? next = UIControl.NextFocusable(root, current, backwards: false);
+                UIControl? previous = UIControl.NextFocusable(root, current, backwards: true);
+
+                if (!ReferenceEquals(next, expectedNext))
+                {
+                    failures.Add(
+                        $"[focus order] Tab from '{current.Name}' should reach '{expectedNext.Name}' " +
+                        $"but reached '{next?.Name ?? "nothing"}'");
+                }
+
+                if (!ReferenceEquals(previous, expectedPrevious))
+                {
+                    failures.Add(
+                        $"[focus order] Shift+Tab from '{current.Name}' should reach '{expectedPrevious.Name}' " +
+                        $"but reached '{previous?.Name ?? "nothing"}'");
+                }
+            }
+
+            // Nothing focused yet: the first Tab has to enter the dialog at one end or the other
+            // rather than doing nothing, otherwise a dialog is unreachable by keyboard.
+            UIControl? entry = UIControl.NextFocusable(root, null, backwards: false);
+            UIControl? backwardsEntry = UIControl.NextFocusable(root, null, backwards: true);
+
+            if (!ReferenceEquals(entry, order[0]))
+                failures.Add($"[focus order] the first Tab should enter at '{order[0].Name}', got '{entry?.Name ?? "nothing"}'");
+
+            if (!ReferenceEquals(backwardsEntry, order[order.Count - 1]))
+                failures.Add($"[focus order] the first Shift+Tab should enter at '{order[order.Count - 1].Name}', got '{backwardsEntry?.Name ?? "nothing"}'");
+
+            Console.WriteLine($"  {order.Count} focusable controls, cycle closes in both directions");
         }
 
         private static UIControl? FindByName(UIControl root, string name)
