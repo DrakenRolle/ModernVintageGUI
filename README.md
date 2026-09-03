@@ -94,33 +94,6 @@ And add it as a Reference to your Mod Project.
 
 Then just build dialogs from anywhere in your client code.
 
-<h2 id="why-you-must-not-set-this-up-yourself">Why you must not set this up yourself</h2>
-
-MVS_UI needs two things per client session, and its own `ModSystem` does both:
-
-```csharp
-// ModernVintageGUIModSystem.StartClientSide - this is the framework's job, not yours
-harmony = new Harmony(HarmonyId);
-harmony.PatchAll(typeof(ModernVintageGUIModSystem).Assembly);
-
-uiManager = new UIManager(api);
-```
-
-**Harmony patches are process-wide.** Once `ClientMain.UpdateFreeMouse` is patched it is patched for
-every caller in the game - there is no per-mod scope. So the single patch MVS_UI applies already
-covers every mod that uses it.
-
-If several mods each did this anyway, you would get one Harmony instance per mod registering the
-same prefix on the same method, and one `UIManager` per mod all subscribed to the same mouse events
-while `UIManager.Current` - a static - only ever points at the last one created. Nothing crashes
-outright, but it is wasted work per frame and unpleasant to debug.
-
-Bundling a copy of the assembly is worse. The game loads mod assemblies per path
-(`Assembly.UnsafeLoadFrom`), so two copies mean two sets of types with the same names:
-`UIControl` from copy A is not the same type as `UIControl` from copy B, each copy has its own
-static `UIManager.Current`, its own patch and its own dialog registry. Depend on the mod, do not
-ship the DLL.
-
 <h2>Create a simple dialog from anywhere in your code</h2>
 
 ```csharp
