@@ -306,6 +306,26 @@ namespace IS2Mod.ControlTypes
         }
         #endregion
 
+        /// <summary>
+        /// Where this control sits on screen, in device pixels.
+        ///
+        /// Positions inside a tree are dialog local (the root sits at 0/0, which is the space the
+        /// Cairo surface is drawn in), while the dialog itself carries the on screen position -
+        /// so the two have to be added. Use this to place a popup at an anchor control: because
+        /// the anchor position is recomputed by every layout pass, reading it again after the
+        /// host moved gives the new position for free.
+        /// </summary>
+        public PointD GetScreenPosition()
+        {
+            CustomDialogElement? dialog = Dialog;
+
+            // The root of a tree already holds a screen position.
+            if (dialog == null || ReferenceEquals(dialog, this))
+                return Position;
+
+            return new PointD(dialog.Position.X + Position.X, dialog.Position.Y + Position.Y);
+        }
+
         #region Hierarchy Management
         public void CalculateChildrenRelationship()
         {

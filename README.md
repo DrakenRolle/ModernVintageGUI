@@ -4,6 +4,11 @@ This is an approach to fix the current GUI system for Vintage Story.
 The core idea of this framework is a stack-container based way to structure and maintain a user
 interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for short.
 
+<img src="docs/images/readme-title-bar.png" alt="A dialog with a vanilla style title bar" />
+
+> **Full control reference:** [docs/Controls.md](docs/Controls.md) - every control in detail, the
+> layout rules, GUI scale, events, focus and depth, and how to write your own control.
+
 <h2>Goals of this Project</h2>
 
 * Make a more modder friendly approach to building user interfaces
@@ -20,57 +25,41 @@ interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for shor
   game updates do not break all the user interfaces
 * Long term thought: fixed positioning reintegrated, but compatible with the designer
 
-The foundation is in place and holding, but there is still a good chunk of work to do. Right now
-three controls exist (`RectangleControl`, `TextLabelControl`, `ButtonControl`); the layout, input
-and scaling systems below them are meant to carry the rest.
-
 <h2>What is included in here</h2>
 
 * **Own parenting and positioning system**, not attached to `ElementBounds`
 * **Autosizing** from content - containers from their children, text labels from their text and font
-* **Repeatable layout.** Measure and arrange are separated: measuring reads only what the caller
-  asked for, arranging writes only the layout result. Laying the same tree out twice gives the same
-  answer, which is what makes reopening a dialog and editing it at runtime safe
-* **Proper GUI scale support.** Everything you specify - `Margin`, `Padding`, `Size`, `FontSize`,
-  `BorderWidth` - is in unscaled author units, exactly like `GuiElement.scaled()` in vanilla. The
-  layout converts to device pixels. Changing the GUI scale slider updates open dialogs live
+* **Repeatable layout.** Measure and arrange are separated, so laying the same tree out twice gives
+  the same answer. That is what makes reopening a dialog and editing it at runtime safe
+* **Proper GUI scale support.** Everything you specify is in unscaled author units, exactly like
+  `GuiElement.scaled()` in vanilla. Moving the GUI scale slider updates open dialogs live
 * **Real mouse capture.** The cursor is released while a dialog is open, clicks are consumed by the
-  dialog instead of reaching the world, and block interaction is suppressed - see
-  [Mouse handling](#mouse-handling)
+  dialog instead of reaching the world, and block interaction is suppressed
+* **Focus driven z-order.** A focused dialog draws above the vanilla GUI and takes clicks in the
+  overlap; an unfocused one goes back below it - the same rule the game applies to its own windows
 * **Dynamic recomposing** after the UI was opened, so you can change and edit the UI as you like
   even if the dialog is already open
 * **Decoupled rendering.** The control tree draws itself onto a single Cairo surface which is
   uploaded once per refresh; the vanilla GUI system is only used where it actually helps
-  (`GuiStyle` colors, the dirt background pattern, `CairoFont` presets)
-* **Easy way to implement new controls** - derive from `UIControl`, override `CalculateSize()` and
-  `GenerateRenderData()`
 * **A headless layout harness** that renders the UI to PNG and checks the layout invariants without
-  starting the game - see [Layout harness](#layout-harness)
+  starting the game
+
+**Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
+`TitleBarControl`.
 
 <h2>What is still ongoing</h2>
 
 * Keyboard input and focus - there is no key handling at all yet, so no ESC to close and no text
-  input. `api.Event.KeyDown` / `KeyUp` covers most of it; typed characters need a Harmony prefix on
-  `ClientMain.OnKeyPress`
-* `Orientation` (a control's own alignment) is currently inert - the constructor parameter named
-  `_Orientation` sets `InsideOrientation` instead, and nothing assigns `Orientation`. See
-  [Layout model](#layout-model)
-* `Orientation.Fill` exists in the enum but is not implemented
+  input
+* `Orientation` (a control's own alignment) is inert, and `Orientation.Fill` is not implemented
 * Redraw invalidation - every hover state change currently recomposes the whole surface
 * Re-centering on window resize
 * XAML editor or custom UI designer
 * Cross compatibility with the vanilla UI (e.g. drag an item from a vanilla UI into a modern one)
 * More styling options (custom backgrounds, fonts)
 * New controls
-  * Top bar / title bar (fixed or movable, matching the vanilla look)
-  * Imagebox
-  * Checkbox
-  * Dropdown
-  * Tabs
-  * Color picker
-  * Inventory grid (with auto scrollbar)
-  * Itemslot
-  * Context menu
+  * Imagebox, Checkbox, Dropdown, Tabs, Color picker
+  * Inventory grid (with auto scrollbar), Itemslot
   * Loading bar / progress bar
 * Updates to existing controls
   * Imagebutton (or an updated button with an image source)
@@ -90,11 +79,13 @@ Declare MVS_UI as a dependency in your `modinfo.json`:
 }
 ```
 
-And add it as a Reference to your Mod Project. 
+And add it as a Reference to your Mod Project.
 
-Then just build dialogs from anywhere in your client code.
+That is all - MVS_UI initialises itself. **Do not** apply the Harmony patch or create a `UIManager`
+in your own mod, and **do not** bundle a copy of the assembly; see
+[why](docs/Controls.md#uimanager).
 
-<h2>Create a simple dialog from anywhere in your code</h2>
+<h2>A dialog</h2>
 
 ```csharp
 var dialog = new CustomDialogElement(capi, "MyTestDialog", "My Title");
@@ -105,53 +96,25 @@ dialog.Children.Add(text);
 dialog.Show();
 ```
 
-<h2>Result</h2>
-
 <img src="docs/images/readme-simple-dialog.png" alt="A dialog with a single text label" />
 
 <h2>Buttons</h2>
 
-`ButtonControl` sizes itself to its caption, draws the vanilla-style embossed border and raises the
-usual mouse events.
-
 ```csharp
-var dialog = new CustomDialogElement(capi, "ButtonDemo", "Buttons");
-
 var save = new ButtonControl(_Name: "saveButton");
 save.Text = "Save";
 save.Clicked += (sender, e) => capi.ShowChatMessage("Save clicked");
 dialog.Children.Add(save);
-
-var cancel = new ButtonControl(_Name: "cancelButton");
-cancel.Text = "Cancel";
-cancel.Clicked += (sender, e) => dialog.Hide();
-dialog.Children.Add(cancel);
-
-dialog.Show();
 ```
 
-<h2>Result</h2>
+<img src="docs/images/readme-buttons-hover.png" alt="Two stacked buttons, the upper one hovered" />
 
-<img src="docs/images/readme-buttons.png" alt="Two stacked buttons" />
+<h2>Stacking</h2>
 
-With the cursor over the first button:
-
-<img src="docs/images/readme-buttons-hover.png" alt="The same two buttons, the upper one hovered" />
-
-<h2>Stacking horizontally</h2>
-
-A container stacks its children along `InsideOrientation`. `Orientation.Top` (the default) stacks
-vertically, `Orientation.Left` stacks horizontally.
+A container stacks its children along `InsideOrientation` - `Top` (the default) downwards, `Left`
+sideways.
 
 ```csharp
-var dialog = new CustomDialogElement(capi, "StackDemo", "Stacking");
-
-// Vertical by default
-var header = new ButtonControl(_Name: "header");
-header.Text = "Vertical child";
-dialog.Children.Add(header);
-
-// A row of buttons
 var row = new RectangleControl();
 row.InsideOrientation = Orientation.Left;
 
@@ -163,153 +126,49 @@ foreach (string caption in new[] { "One", "Two", "Three" })
 }
 
 dialog.Children.Add(row);
-dialog.Show();
 ```
-
-<h2>Result</h2>
 
 <img src="docs/images/readme-stacking.png" alt="A vertical child above a horizontal row of three buttons" />
 
-<h2>Mixing controls in one row</h2>
-
-```csharp
-var row = new RectangleControl();
-row.InsideOrientation = Orientation.Left;
-
-var left = new ButtonControl();
-left.Text = "Test";
-row.Children.Add(left);
-
-var label = new TextLabelControl("in between");
-label.Orientation = TextOrientation.Center;
-row.Children.Add(label);
-
-var right = new ButtonControl();
-right.Text = "Test";
-row.Children.Add(right);
-```
-
-<h2>Result</h2>
+Controls of different kinds mix freely in one row:
 
 <img src="docs/images/readme-mixed-row.png" alt="A button, a text label and another button in one row" />
 
+<h2>Context menus</h2>
+
+A menu hangs on any control, positions itself at an anchor and supports cascades. One subscription
+sees picks from every level.
+
+```csharp
+var menu = new ContextMenuControl(button, items, "positionMode", ContextMenuAnchor.BottomLeft);
+button.Clicked += (sender, e) => menu.Toggle();
+
+menu.ItemActivated += (sender, e) => capi.ShowChatMessage(string.Join(" > ", e.Path.Select(i => i.Text)));
+```
+
+<img src="docs/images/readme-context-menu-hover.png" alt="A context menu with an entry hovered" />
+
 <h2>Editing the UI after it was opened</h2>
 
-Adding or removing a child triggers a full relayout and redraw of the dialog it belongs to. You do
-not have to close and reopen anything. Property changes on a control are not observed yet, so ask
-for a redraw yourself after those.
+Adding or removing a child relays out and redraws the dialog it belongs to. You do not have to close
+and reopen anything. Property changes are not observed yet, so ask for a redraw yourself after those.
 
 ```csharp
-dialog.Show();
-
-// Later, from anywhere
 row.Children.Add(new ButtonControl { Text = "Added at runtime" });
-
 myLabel.Text = "Hey don't touch my fancy Text!";
-dialog.Refresh();   // text changes are not observed yet, so ask for a redraw
+dialog.Refresh();
 ```
-
-<h2>Result</h2>
-
-Before:
 
 <img src="docs/images/readme-runtime-before.png" alt="A row with two buttons" />
-
-After adding a third button at runtime - the dialog resized itself around it:
-
 <img src="docs/images/readme-runtime-after.png" alt="The same row with a third, wider button appended" />
 
-<h1>How it works</h1>
+<h2>GUI scale</h2>
 
-<h2 id="layout-model">Layout model</h2>
+One design, any scale - author units in, device pixels out:
 
-Layout runs in two passes, and the split is what keeps it repeatable:
+<img src="docs/images/readme-scales.png" alt="The same UI rendered at GUI scale 1.0, 1.5 and 2.0" />
 
-| | written by | read by |
-|---|---|---|
-| `ExplicitSize` | you, through the `Size` setter | measure, when `IsAutoSize` is false |
-| `CalculatedSize` | `CalculateSize()` (measure) | the overflow / clipping check |
-| `Size` | measure and arrange, through `SetLayoutSize()` | rendering and hit testing |
-
-**If you write a control, keep to that split**: measure must read `ExplicitSize`, never `Size`, and
-arrange must write through `SetLayoutSize()`, never through the `Size` setter. Writing a measured
-value through the `Size` setter turns it into an explicit size, and the control then stops measuring
-itself on the next pass - which shows up as boxes that keep an old size while their content is drawn
-at the current one.
-
-Sizes and positions on a laid out tree are in **device pixels**. Everything you assign - `Margin`,
-`Padding`, `Size`, `FontSize`, `BorderWidth` - is in **unscaled author units** and is multiplied by
-`LayoutScale` during layout, the same way `GuiElement.scaled()` works in the vanilla GUI. Children
-are laid out in dialog-local space with the root at 0/0; only the dialog itself is then moved to its
-position on screen.
-
-A known rough edge: the constructor parameter called `_Orientation` sets **`InsideOrientation`** -
-the direction a control stacks its *children* in. The `Orientation` property, meant to be a
-control's own alignment inside its parent, is currently never assigned and has no effect. Set
-`InsideOrientation` explicitly when you want to be sure what you get.
-
-<h2 id="mouse-handling">Mouse handling</h2>
-
-Two things are needed to make a non-`GuiDialog` UI usable, and neither has an API hook.
-
-`ClientMain.UpdateFreeMouse()` recomputes `MouseGrabbed` once per rendered frame purely from the
-number of open **vanilla** `GuiDialog`s. A custom dialog does not count, so the game re-grabs the
-cursor on the next frame. `ClientMainUpdateFreeMousePatch` is a Harmony **prefix** that replaces the
-method while one of our dialogs is open. It has to replace rather than correct it: both `MouseGrabbed`
-setters have side effects on every change of value - the platform warps the cursor to the window
-center, and `ClientMain` drops the item held on the mouse - so flipping the value back in a postfix
-would fire those twice per frame.
-
-Input goes through `api.Event.MouseDown` / `MouseUp` / `MouseMove` / `MouseWheelMove`, not through
-`ClientPlatformWindows.mouseEventHandlers`. The platform hands every entry in that list its own
-freshly allocated `MouseEvent`, so setting `Handled` there cannot stop the game from also processing
-the click. `ClientMain` triggers the event API *before* forwarding to its client systems and aborts
-as soon as `Handled` is set, so that is the only hook that can actually swallow input.
-
-`UIManager` routes events to the open dialogs topmost first, and steps aside when the cursor is over
-an open vanilla dialog so the inventory and the escape menu stay usable.
-
-<h2>Events</h2>
-
-Every `UIControl` exposes `Clicked`, `Enter`, `Exit`, `MouseDown`, `MouseUp`, `MouseMove` and
-`MouseWheel`. A click is only raised when press and release happened on the same control.
-
-```csharp
-button.Enter   += (s, e) => { /* hover in  */ };
-button.Exit    += (s, e) => { /* hover out */ };
-button.Clicked += (s, e) => { /* e.X, e.Y, e.Button */ };
-```
-
-<h2>Writing a custom control</h2>
-
-```csharp
-public class MyControl : UIControl
-{
-    public override PointD CalculateSize()
-    {
-        // Measure: return the desired size in device pixels, and record it.
-        PointD measured = new PointD(ScaledPadding * 2 + 100, ScaledPadding * 2 + 20);
-
-        CalculatedSize = measured;
-        SetLayoutSize(measured);
-        return measured;
-    }
-
-    public override void GenerateRenderData(ImageSurface surface, Context ctx)
-    {
-        // Draw into the shared surface using Position and Size (already device pixels).
-        ctx.Rectangle(Position.X, Position.Y, Size.X, Size.Y);
-        ctx.Fill();
-
-        base.GenerateRenderData(surface, ctx);   // draws the children
-    }
-}
-```
-
-Do not upload anything to the GPU in `GenerateRenderData` - the dialog uploads the finished surface
-exactly once per refresh.
-
-<h2 id="layout-harness">Layout harness</h2>
+<h1>Layout harness</h1>
 
 `ZLayoutHarness` runs the real layout code without the game, renders each scenario to PNG and checks
 the invariants:
@@ -318,30 +177,21 @@ the invariants:
 dotnet run --project ModernVintageGUI/ZLayoutHarness
 ```
 
-It exits 0 when everything passes and 1 otherwise, so it works in CI. For every scenario it checks:
+Exit code 0 when everything passes, 1 otherwise, so it works in CI. Per scenario it checks
+idempotence over five passes, that nothing collapsed to zero, that no siblings overlap in a stacking
+container, that laying out at 1.5x and 2x gives the same design that much larger, and that a tree
+reused across a scale change matches a freshly built one. Add a scenario in `Scenarios.cs` whenever
+you add a control.
 
-* **Idempotence** - five layout passes in a row must not move anything
-* **No collapsed controls** - nothing may end up with zero width or height
-* **No overlapping siblings** in a stacking container
-* **Proportional scaling** - laying out at 1.5x and 2x must give the same design, that much larger
-* **Surviving a scale change** - a tree laid out over `1x -> 1.5x -> 2x -> 1.5x -> 1x` must match a
-  freshly built tree at each scale, which is what happens in game when a dialog is reopened after
-  the GUI scale slider moved
-
-Add a scenario in `Scenarios.cs` whenever you add a control. What the harness cannot cover is
-anything that only exists at runtime in the game: the Harmony patches, the actual mouse grab, GPU
-uploads and the interplay with vanilla dialogs.
-
-Every picture in this README is rendered by the same harness, through the real layout and drawing
-code, so they can be regenerated instead of re-screenshotted whenever a control changes:
+Every picture in this README is rendered by the same harness through the real drawing code, so they
+can be regenerated instead of re-screenshotted:
 
 ```
 dotnet run --project ModernVintageGUI/ZLayoutHarness -- --docs docs/images
 ```
 
-The same tree laid out at 1x, 1.5x and 2x - one design, three scales:
-
-<img src="docs/images/readme-scales.png" alt="The same UI rendered at GUI scale 1.0, 1.5 and 2.0" />
+What the harness cannot cover is anything that only exists at runtime in the game: the Harmony
+patches, the real mouse grab, focus and depth against vanilla dialogs, and GPU uploads.
 
 <h1>Building</h1>
 

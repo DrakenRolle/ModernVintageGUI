@@ -1,6 +1,8 @@
 using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
+using ModernVintageGUI.ControlTypes;
+using Vintagestory.API.Client;
 using System;
 using System.Collections.Generic;
 
@@ -32,6 +34,31 @@ namespace LayoutHarness
                               "used to fold its own size plus the children plus the padding back " +
                               "in, so it grew on every layout pass.",
                 Build = BuildFixedSizeContainer
+            };
+
+            yield return new Scenario
+            {
+                Name = "title-bar",
+                Description = "A dialog with a vanilla style title bar: full bleed bar on top, "
+                            + "padded content below it.",
+                Build = BuildTitleBar
+            };
+
+            yield return new Scenario
+            {
+                Name = "context-menu-items",
+                Description = "The item stack a ContextMenuControl puts into its popup: entries " +
+                              "stacked vertically, each entry a button that gets normalized to " +
+                              "the width of the widest one.",
+                Build = BuildContextMenuItems
+            };
+
+            yield return new Scenario
+            {
+                Name = "context-menu-hover",
+                Description = "The same stack with the cursor on the first entry - the highlight is "
+                            + "produced by the real Enter handler, not by setting colours by hand.",
+                Build = BuildContextMenuHover
             };
 
             yield return new Scenario
@@ -123,6 +150,60 @@ namespace LayoutHarness
             fixedBox.Children.Add(inner);
 
             root.Children.Add(fixedBox);
+
+            return root;
+        }
+
+        /// <summary>
+        /// Mirrors what ContextMenuControl builds inside its popup. The popup itself cannot be
+        /// constructed headless (it needs the client API), but the part that has to lay out
+        /// correctly is this stack.
+        /// </summary>
+        private static RectangleControl BuildTitleBar()
+        {
+            var root = new RectangleControl(
+                backgroundColor: new ElementColor(0.20, 0.16, 0.13, 1.0),
+                _Name: "root");
+
+            root.InsideOrientation = Orientation.Top;
+            root.Padding = 0;
+
+            root.Children.Add(new TitleBarControl("My Title") { Name = "titleBar" });
+
+            var content = new RectangleControl(_Name: "content");
+            content.InsideOrientation = Orientation.Top;
+            content.Padding = 10;
+
+            var save = new ButtonControl(_Name: "save");
+            save.Text = "Save";
+            content.Children.Add(save);
+
+            root.Children.Add(content);
+            return root;
+        }
+
+        private static RectangleControl BuildContextMenuItems()
+        {
+            RectangleControl root = CreateRoot();
+
+            // The very box ContextMenuControl puts into its popup.
+            RectangleControl stack = ContextMenuControl.CreateMenuBackground("itemStack");
+
+            foreach (string caption in new[] { "Fixed", "Moveable", "Reset position" })
+            {
+                stack.Children.Add(new ContextMenuItem(caption) { Name = caption });
+            }
+
+            root.Children.Add(stack);
+            return root;
+        }
+
+        private static RectangleControl BuildContextMenuHover()
+        {
+            RectangleControl root = BuildContextMenuItems();
+            RectangleControl stack = (RectangleControl)root.Children[0];
+
+            ((ContextMenuItem)stack.Children[0]).InvokeEventEnter(new MouseEvent(0, 0));
 
             return root;
         }

@@ -2,6 +2,10 @@ using HarmonyLib;
 using IS2Mod.ControlTypes;
 using IS2Mod.ControlTypes.Custom;
 using IS2Mod.Input;
+using ModernVintageGUI.ControlTypes;
+using ModernVintageGUI.Enums;
+using System.Collections.Generic;
+using System.Linq;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
@@ -68,15 +72,29 @@ namespace ModernVintageGUI
         {
             var testDialog = new CustomDialogElement(capi, "myDialog", "My Title");
 
+            // The title bar has to reach the edges the way vanilla does, so the dialog itself
+            // gets no padding and the content below the bar sits in a padded container instead.
+            testDialog.Padding = 0;
+
+            var titleBar = new TitleBarControl("My Title") { Name = "titleBar" };
+            testDialog.Children.Add(titleBar);
+
+            var content = new RectangleControl(_Name: "content");
+            content.InsideOrientation = IS2Mod.Enums.Orientation.Top;
+            content.Padding = 10;
+            testDialog.Children.Add(content);
+
             var button = new ButtonControl(_Name: "saveButton");
             button.Text = "Save";
-            testDialog.Children.Add(button);
+            content.Children.Add(button);
+
+            AttachTestContextMenu(capi, button);
 
             var button2 = new ButtonControl(_Name: "saveButton2");
             button2.Text = "Save";
             button2.Size = new Cairo.PointD(150, 150);
             button2.IsAutoSize = false;
-            testDialog.Children.Add(button2);
+            content.Children.Add(button2);
 
             RectangleControl rect = new RectangleControl();
             rect.InsideOrientation = IS2Mod.Enums.Orientation.Left;
@@ -101,9 +119,49 @@ namespace ModernVintageGUI
             button2345.Text = "Test";
             rect.Children.Add(button2345);
 
-            testDialog.Children.Add(rect);
+            content.Children.Add(rect);
 
             return testDialog;
+        }
+
+        /// <summary>
+        /// Test menu for the context menu work: the same two entries the vanilla dialog title bar
+        /// offers, so the look can be compared against the original side by side.
+        ///
+        /// The menu adds itself to the button in its constructor and sits there as a zero sized
+        /// anchor - the button keeps its size and everything below it stays where it was.
+        /// </summary>
+        private static void AttachTestContextMenu(ICoreClientAPI capi, ButtonControl button)
+        {
+            // Third entry with children, to exercise the cascade.
+            var moreItem = new ContextMenuItem("More", new List<ContextMenuItem>
+            {
+                new ContextMenuItem("Text 1"),
+                new ContextMenuItem("Text 2"),
+                new ContextMenuItem("Text 3")
+            });
+
+            var menu = new ContextMenuControl(
+                button,
+                new List<ContextMenuItem>
+                {
+                    new ContextMenuItem("Fixed"),
+                    new ContextMenuItem("Movable"),
+                    moreItem
+                },
+                "positionMode",
+                ContextMenuAnchor.BottomLeft);
+
+            // One subscription for the whole cascade - picks from the sub menu bubble up here
+            // too, so no reference to any single entry has to be kept around.
+            menu.ItemActivated += (sender, e) =>
+            {
+                capi.ShowChatMessage("Context menu: " + string.Join(" > ", e.Path.Select(i => i.Text)));
+            };
+
+            // Clicking the button again while the menu is open does not reach this handler: the
+            // UIManager consumes that click to dismiss the menu, which is what makes it a toggle.
+            button.Clicked += (sender, e) => menu.Toggle();
         }
 
         public override void Dispose()

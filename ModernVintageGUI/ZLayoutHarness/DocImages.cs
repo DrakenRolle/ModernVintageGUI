@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Vintagestory.API.Client;
+using ModernVintageGUI.ControlTypes;
 using IOPath = System.IO.Path;
 
 namespace LayoutHarness
@@ -135,6 +136,9 @@ namespace LayoutHarness
             yield return ("readme-buttons-hover", BuildButtonsHovered());
             yield return ("readme-stacking", BuildStacking());
             yield return ("readme-mixed-row", BuildMixedRow());
+            yield return ("readme-title-bar", BuildTitleBar());
+            yield return ("readme-context-menu", BuildContextMenu(hovered: false));
+            yield return ("readme-context-menu-hover", BuildContextMenu(hovered: true));
             yield return ("readme-runtime-before", BuildRuntimeEdit(added: false));
             yield return ("readme-runtime-after", BuildRuntimeEdit(added: true));
         }
@@ -234,6 +238,53 @@ namespace LayoutHarness
             row.Children.Add(right);
 
             root.Children.Add(row);
+            return root;
+        }
+
+        private static UIControl BuildTitleBar()
+        {
+            RectangleControl root = CreateDialogRoot();
+            root.Padding = 0;
+
+            root.Children.Add(new TitleBarControl("Inventory"));
+
+            var content = new RectangleControl(_Name: "content");
+            content.InsideOrientation = Orientation.Top;
+            content.Padding = 10;
+
+            var save = new ButtonControl();
+            save.Text = "Save";
+            content.Children.Add(save);
+
+            root.Children.Add(content);
+            return root;
+        }
+
+        private static UIControl BuildContextMenu(bool hovered)
+        {
+            RectangleControl root = CreateDialogRoot();
+            root.Padding = 1;
+
+            RectangleControl stack = ContextMenuControl.CreateMenuBackground("menu");
+
+            var entries = new List<ContextMenuItem>
+            {
+                new ContextMenuItem("Fixed"),
+                new ContextMenuItem("Movable"),
+                new ContextMenuItem("More")
+            };
+
+            foreach (ContextMenuItem entry in entries)
+            {
+                stack.Children.Add(entry);
+            }
+
+            if (hovered)
+            {
+                entries[1].InvokeEventEnter(new MouseEvent(0, 0));
+            }
+
+            root.Children.Add(stack);
             return root;
         }
 

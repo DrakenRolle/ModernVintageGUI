@@ -29,26 +29,67 @@ namespace IS2Mod.ControlTypes.Custom
         /// through to vanilla GUIs or to the world.
         /// </summary>
         public bool IsModal { get; set; } = true;
+
+        /// <summary>The render band this dialog was created in.</summary>
+        public DialogRenderLayer Layer { get; }
+
+        /// <summary>
+        /// Whether this dialog currently has focus. A focused dialog draws above the vanilla GUI
+        /// and takes clicks in the overlap; an unfocused one draws below it and yields them.
+        /// That is the rule the game applies to its own windows, and <see cref="Input.UIManager"/>
+        /// keeps it in sync when the player clicks.
+        /// </summary>
+        public bool IsFocused { get; internal set; }
+
+        /// <summary>
+        /// Re-center the dialog on every layout pass. Turn this off for anything that is
+        /// positioned by its opener - a context menu at its anchor, a tooltip at the cursor.
+        /// <see cref="ShowAt"/> does that for you.
+        /// </summary>
+        public bool AutoCenter { get; set; } = true;
+
+        /// <summary>
+        /// Draw the vanilla style dialog background. Off gives a fully transparent surface, so a
+        /// popup can consist of nothing but its own controls.
+        /// </summary>
+        public bool DrawsBackground { get; set; } = true;
+
+        /// <summary>
+        /// Close this dialog when a mouse button goes down anywhere outside of it. This is what
+        /// makes a context menu dismissable; <see cref="Input.UIManager"/> applies it, because a
+        /// click outside never reaches this dialog through the normal event path.
+        /// </summary>
+        public bool CloseOnOutsideClick { get; set; }
         #endregion
 
         #region Private Fields
         private CustomUIRenderer? _renderer;
+        private CustomUIRenderer? _focusedRenderer;
+        private PointD _requestedPosition;
         private readonly string _rendererId;
         private LoadedTexture? _cursorTexture;
         private bool _isDisposed;
         #endregion
 
         #region Constructor
+        /// <param name="_Layer">
+        /// Which render band this dialog draws in. Has to be decided here rather than through a
+        /// property, because the game sorts its renderer list when the renderer is registered
+        /// and never re-sorts it. Popups (context menus, dropdowns, tooltips) belong in
+        /// <see cref="DialogRenderLayer.Overlay"/> so they cover ordinary dialogs.
+        /// </param>
         public CustomDialogElement(
             ICoreClientAPI capi,
             string _DialogName,
-            string _Title = "")
+            string _Title = "",
+            DialogRenderLayer _Layer = DialogRenderLayer.Normal)
             : base(_Orientation: Orientation.Top, _Margin: 0, _Padding: 10)
         {
             Dialog = this;
             DialogName = _DialogName;
             Title = _Title;
             Api = capi;
+            Layer = _Layer;
             MousePosition = new Vec2i();
             _rendererId = $"customdialog_{_DialogName}_{Guid.NewGuid()}";
 
@@ -59,10 +100,24 @@ namespace IS2Mod.ControlTypes.Custom
 
         #region Renderer Management
 
+        /// <summary>
+        /// Two renderers, one below the vanilla GUI and one above it. Which of them draws is
+        /// decided per frame by <see cref="IsFocused"/>.
+        ///
+        /// It has to be two registrations rather than one whose order changes: the game sorts
+        /// its renderer list when a renderer is registered and never re-sorts it, so moving a
+        /// dialog between the bands would mean unregistering and registering again - in the
+        /// middle of input handling, while the render loop may be walking that very list.
+        /// </summary>
         private void RegisterRenderer()
         {
-            _renderer = new CustomUIRenderer(Api, this);
+            int sequence = CustomUIRenderer.NextSequence(Layer);
+
+            _renderer = new CustomUIRenderer(Api, this, Layer, aboveVanilla: false, sequence);
             Api.Event.RegisterRenderer(_renderer, EnumRenderStage.Ortho, _rendererId);
+
+            _focusedRenderer = new CustomUIRenderer(Api, this, Layer, aboveVanilla: true, sequence);
+            Api.Event.RegisterRenderer(_focusedRenderer, EnumRenderStage.Ortho, _rendererId + "_focused");
         }
 
         private void UnregisterRenderer()
@@ -70,8 +125,15 @@ namespace IS2Mod.ControlTypes.Custom
             if (_renderer != null)
             {
                 Api.Event.UnregisterRenderer(_renderer, EnumRenderStage.Ortho);
-                _renderer?.Dispose();
+                _renderer.Dispose();
                 _renderer = null;
+            }
+
+            if (_focusedRenderer != null)
+            {
+                Api.Event.UnregisterRenderer(_focusedRenderer, EnumRenderStage.Ortho);
+                _focusedRenderer.Dispose();
+                _focusedRenderer = null;
             }
         }
         #endregion
@@ -103,8 +165,11 @@ namespace IS2Mod.ControlTypes.Custom
             }
         }
 
-        private void DrawDialogBackground(Context context)
+        protected virtual void DrawDialogBackground(Context context)
         {
+            if (!DrawsBackground)
+                return;
+
             // Draw rounded rectangle
             GuiElement.RoundRectangle(
                 context,
@@ -165,10 +230,17 @@ namespace IS2Mod.ControlTypes.Custom
 
             IsVisible = false;
 
-            // Drop stale hover/press state so a reopened dialog does not start out believing
-            // the cursor is still on the control it was on when it closed.
-            currentlyHovered = null;
+            // Drop stale hover/press state so a reopened dialog does not start out believing the
+            // cursor is still on the control it was on when it closed.
+            //
+            // Clearing the fields is not enough: a control paints its own hover look and only
+            // undoes that when it gets Exit. Without this the last control the cursor was on -
+            // the entry that was just clicked, typically - stays lit the next time the dialog is
+            // shown. IsVisible is already false here, so the redraw those handlers ask for is a
+            // no-op; the corrected state is drawn by the Refresh in Show().
+            ClearHoverState(new MouseEvent(MousePosition.X, MousePosition.Y));
             pressedControl = null;
+            ReleaseMouseCapture();
 
             // No need to re-grab the mouse by hand: once no dialog is registered any more the
             // patch stops interfering and UpdateFreeMouse restores the vanilla state on its own.
@@ -185,9 +257,27 @@ namespace IS2Mod.ControlTypes.Custom
         #endregion
 
         #region Position and Update
+        /// <summary>
+        /// Places the dialog at a screen position. The value is remembered, because the arrange
+        /// pass resets the root position to 0/0 on every layout - without remembering it, a
+        /// dialog that does not auto-center would jump to the top left corner.
+        /// </summary>
         public void SetPosition(double x, double y)
         {
-            Position = new PointD(x, y);
+            _requestedPosition = new PointD(x, y);
+            Position = _requestedPosition;
+        }
+
+        /// <summary>
+        /// Opens the dialog at a screen position instead of centered - what a context menu wants
+        /// at its anchor point. Use <see cref="UIControl.GetScreenPosition"/> on the anchor
+        /// control to get that position.
+        /// </summary>
+        public void ShowAt(double screenX, double screenY)
+        {
+            AutoCenter = false;
+            SetPosition(screenX, screenY);
+            Show();
         }
 
         /// <summary>
@@ -204,8 +294,18 @@ namespace IS2Mod.ControlTypes.Custom
         {
             LayoutScale = scale;
 
+            // The arrange pass resets the root position to 0/0, so the on screen position has
+            // to be re-applied afterwards either way.
             base.PerformLayout();
-            CenterOnScreen();
+
+            if (AutoCenter)
+            {
+                CenterOnScreen();
+            }
+            else
+            {
+                Position = _requestedPosition;
+            }
         }
 
         /// <summary>
@@ -287,10 +387,47 @@ namespace IS2Mod.ControlTypes.Custom
             }
         }
 
+        /// <summary>
+        /// The control that is currently receiving all mouse movement and the next release,
+        /// regardless of where the cursor actually is. Needed for anything that is dragged: the
+        /// cursor leaves the control almost immediately, and without capture the hit test would
+        /// hand the events to whatever is underneath instead.
+        /// </summary>
+        public UIControl? CapturedControl { get; private set; }
+
+        public void CaptureMouse(UIControl control)
+        {
+            CapturedControl = control;
+        }
+
+        public void ReleaseMouseCapture()
+        {
+            CapturedControl = null;
+        }
+
         public void HandleMouseUp(MouseEvent e)
         {
             if (!IsVisible)
                 return;
+
+            if (CapturedControl != null)
+            {
+                UIControl captured = CapturedControl;
+                ReleaseMouseCapture();
+
+                captured.InvokeEventMouseUp(e);
+
+                // Releasing without having left the control still counts as a click, so a
+                // draggable control can also just be clicked.
+                if (HitTest(e.X, e.Y) == captured)
+                {
+                    captured.InvokeEventClicked(e);
+                }
+
+                pressedControl = null;
+                e.Handled = true;
+                return;
+            }
 
             UIControl? releasedControl = HitTest(e.X, e.Y);
 
@@ -316,6 +453,14 @@ namespace IS2Mod.ControlTypes.Custom
                 return;
 
             MousePosition = new Vec2i(e.X, e.Y);
+
+            // While something is being dragged it keeps every move, wherever the cursor is.
+            if (CapturedControl != null)
+            {
+                CapturedControl.InvokeEventMouseMove(e);
+                e.Handled = true;
+                return;
+            }
 
             UIControl? controlUnderMouse = HitTest(e.X, e.Y);
 

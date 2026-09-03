@@ -1,6 +1,8 @@
 using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
+using ModernVintageGUI.ControlTypes;
+using ModernVintageGUI.Enums;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -73,6 +75,8 @@ namespace LayoutHarness
             {
                 RunScenario(scenario, outputDir, failures);
             }
+
+            CheckContextMenuAnchorIsFree(failures);
 
             Console.WriteLine();
 
@@ -211,6 +215,87 @@ namespace LayoutHarness
         }
 
         #region Checks
+        /// <summary>
+        /// A ContextMenuControl hangs in the host tree purely as an anchor and must not cost any
+        /// layout space. Two identical trees are laid out, one of them with a menu attached to a
+        /// button - the result has to be the same down to the pixel.
+        /// </summary>
+        private static void CheckContextMenuAnchorIsFree(List<string> failures)
+        {
+            Console.WriteLine("### context menu anchor");
+            Console.WriteLine("Attaching a ContextMenuControl must not change the host layout.");
+            Console.WriteLine();
+
+            RectangleControl BuildHost(bool withMenu)
+            {
+                var root = new RectangleControl(_Name: "root");
+                root.InsideOrientation = Orientation.Top;
+                root.Padding = 10;
+
+                var opener = new ButtonControl(_Name: "opener");
+                opener.Text = "Title bar mode";
+                root.Children.Add(opener);
+
+                var below = new ButtonControl(_Name: "below");
+                below.Text = "Something below";
+                root.Children.Add(below);
+
+                if (withMenu)
+                {
+                    // Attaches itself to the opener in its constructor.
+                    _ = new ContextMenuControl(
+                        opener,
+                        new List<ContextMenuItem>
+                        {
+                            new ContextMenuItem("Fixed"),
+                            new ContextMenuItem("Moveable")
+                        },
+                        "modeMenu",
+                        ContextMenuAnchor.BottomLeft);
+                }
+
+                return root;
+            }
+
+            RectangleControl plain = BuildHost(withMenu: false);
+            RectangleControl withMenu = BuildHost(withMenu: true);
+
+            plain.PerformLayout();
+            withMenu.PerformLayout();
+
+            void Compare(string what, PointD a, PointD b)
+            {
+                if (Math.Abs(a.X - b.X) < 0.001 && Math.Abs(a.Y - b.Y) < 0.001)
+                    return;
+
+                failures.Add(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "[context menu anchor] attaching a menu changed {0}: {1:0.##}/{2:0.##} without, {3:0.##}/{4:0.##} with",
+                    what, a.X, a.Y, b.X, b.Y));
+            }
+
+            Compare("the host size", plain.Size, withMenu.Size);
+
+            UIControl plainBelow = FindByName(plain, "below")!;
+            UIControl menuBelow = FindByName(withMenu, "below")!;
+            Compare("the position of the control below the opener", plainBelow.Position, menuBelow.Position);
+
+            Console.WriteLine(
+                $"  host {plain.Size.X:0.##}x{plain.Size.Y:0.##} without menu, " +
+                $"{withMenu.Size.X:0.##}x{withMenu.Size.Y:0.##} with");
+        }
+
+        private static UIControl? FindByName(UIControl root, string name)
+        {
+            foreach (UIControl control in LayoutSnapshot.Walk(root))
+            {
+                if (control.Name == name)
+                    return control;
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// The whole point of the GUI scale work: laying out at scale S has to produce the same
         /// design S times larger. A dimension somebody forgot to scale shows up here as a size

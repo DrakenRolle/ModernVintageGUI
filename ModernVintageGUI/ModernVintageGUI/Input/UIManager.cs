@@ -1,4 +1,5 @@
 using IS2Mod.ControlTypes.Custom;
+using IS2Mod.Enums;
 using System;
 using System.Collections.Generic;
 using Vintagestory.API.Client;
@@ -62,7 +63,56 @@ namespace IS2Mod.Input
                 return;
 
             _openDialogs.Add(dialog);
+
+            // A window that just opened is the one the player is looking at.
+            if (dialog.Layer == DialogRenderLayer.Normal)
+            {
+                FocusDialog(dialog);
+            }
+
             UpdateMouseState();
+        }
+
+        /// <summary>
+        /// Gives a dialog focus and takes it from all the others, which is what decides whether it
+        /// draws above or below the vanilla GUI and who wins a click in an overlap. Moving it to
+        /// the end of the list also makes it topmost for input, so both orders agree.
+        /// </summary>
+        public void FocusDialog(CustomDialogElement dialog)
+        {
+            foreach (CustomDialogElement other in _openDialogs)
+            {
+                other.IsFocused = ReferenceEquals(other, dialog);
+            }
+
+            if (_openDialogs.Remove(dialog))
+            {
+                _openDialogs.Add(dialog);
+            }
+        }
+
+        /// <summary>
+        /// Drops focus from all of our dialogs - the player clicked a vanilla window, so that one
+        /// belongs on top now and ours go back below it.
+        /// </summary>
+        public void UnfocusAll()
+        {
+            foreach (CustomDialogElement dialog in _openDialogs)
+            {
+                dialog.IsFocused = false;
+            }
+        }
+
+        /// <summary>The topmost of our visible dialogs under the given point, if any.</summary>
+        private CustomDialogElement? TopMostAt(int x, int y)
+        {
+            foreach (CustomDialogElement dialog in DialogsTopMostFirst())
+            {
+                if (dialog.IsVisible && dialog.ContainsScreenPoint(x, y))
+                    return dialog;
+            }
+
+            return null;
         }
 
         public void UnregisterDialog(CustomDialogElement dialog)
@@ -150,12 +200,74 @@ namespace IS2Mod.Input
             return snapshot;
         }
 
+        /// <summary>
+        /// Closes every open dialog that asked to be dismissed by an outside click and does not
+        /// contain the point. This cannot live in the dialog itself: a click outside is never
+        /// delivered there, because the hit test finds nothing and the event moves on.
+        /// </summary>
+        /// <returns>true when something was closed, so the caller can swallow the click.</returns>
+        private bool DismissPopups(int x, int y)
+        {
+            bool closedAny = false;
+            bool insideOne = false;
+
+            // Topmost first, and stop at the first dialog the click landed in. That handles
+            // cascades: clicking a sub menu entry stops before the parent menu, so the parent
+            // survives, while clicking the parent closes only the sub menu below it.
+            //
+            // Snapshot, because Hide() unregisters and would mutate the list we are walking.
+            foreach (CustomDialogElement dialog in DialogsTopMostFirst())
+            {
+                if (!dialog.IsVisible)
+                    continue;
+
+                if (dialog.ContainsScreenPoint(x, y))
+                {
+                    insideOne = true;
+                    break;
+                }
+
+                if (!dialog.CloseOnOutsideClick)
+                    continue;
+
+                dialog.Hide();
+                closedAny = true;
+            }
+
+            // Only a click that landed on nothing of ours gets eaten by the dismissal. A click
+            // inside one of our dialogs has to go through, otherwise picking another entry while
+            // a sub menu is open would silently do nothing.
+            return closedAny && !insideOne;
+        }
+
         private void OnMouseDown(MouseEvent e)
         {
-            if (PointerOverVanillaDialog(e.X, e.Y))
+            // Whoever is drawn on top gets the click. Ours is on top only while it has focus -
+            // a popup always is, since it is transient and must cover everything.
+            CustomDialogElement? ours = TopMostAt(e.X, e.Y);
+            bool oursOnTop = ours != null && (ours.Layer == DialogRenderLayer.Overlay || ours.IsFocused);
+
+            if (!oursOnTop && PointerOverVanillaDialog(e.X, e.Y))
             {
+                // The player clicked a vanilla window that covers us - it takes focus, we drop it.
+                UnfocusAll();
                 CancelPress();
                 return;
+            }
+
+            // The click that dismisses a menu is consumed by the dismissal, so it does not also
+            // press whatever sits underneath. This is what makes clicking the opener a toggle.
+            if (DismissPopups(e.X, e.Y))
+            {
+                CancelPress();
+                e.Handled = true;
+                return;
+            }
+
+            // Clicking one of our dialogs brings it to the front, the way the game does it.
+            if (ours != null && ours.Layer == DialogRenderLayer.Normal)
+            {
+                FocusDialog(ours);
             }
 
             foreach (CustomDialogElement dialog in DialogsTopMostFirst())
@@ -165,8 +277,31 @@ namespace IS2Mod.Input
             }
         }
 
+        /// <summary>
+        /// The dialog holding a mouse capture, if any. While a drag is running it gets movement
+        /// and the release no matter where the cursor went - past the hit test, past the vanilla
+        /// dialog check and past every other dialog.
+        /// </summary>
+        private CustomDialogElement? CapturingDialog()
+        {
+            foreach (CustomDialogElement dialog in DialogsTopMostFirst())
+            {
+                if (dialog.IsVisible && dialog.CapturedControl != null)
+                    return dialog;
+            }
+
+            return null;
+        }
+
         private void OnMouseUp(MouseEvent e)
         {
+            CustomDialogElement? capturing = CapturingDialog();
+            if (capturing != null)
+            {
+                capturing.HandleMouseUp(e);
+                return;
+            }
+
             if (PointerOverVanillaDialog(e.X, e.Y))
             {
                 CancelPress();
@@ -182,6 +317,13 @@ namespace IS2Mod.Input
 
         private void OnMouseMove(MouseEvent e)
         {
+            CustomDialogElement? capturing = CapturingDialog();
+            if (capturing != null)
+            {
+                capturing.HandleMouseMove(e);
+                return;
+            }
+
             if (PointerOverVanillaDialog(e.X, e.Y))
             {
                 // The cursor moved onto a vanilla GUI. Drop our hover state, otherwise the
