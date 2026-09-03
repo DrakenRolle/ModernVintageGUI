@@ -90,10 +90,7 @@ Declare MVS_UI as a dependency in your `modinfo.json`:
 }
 ```
 
-That is all. The game enforces dependencies and loads MVS_UI before your mod, and MVS_UI
-initialises itself. **Do not** apply the Harmony patch or create a `UIManager` in your own mod, and
-**do not** bundle a copy of the MVS_UI assembly inside your mod - see
-[Why you must not set this up yourself](#why-you-must-not-set-this-up-yourself).
+And add it as a Reference to your Mod Project. 
 
 Then just build dialogs from anywhere in your client code.
 
