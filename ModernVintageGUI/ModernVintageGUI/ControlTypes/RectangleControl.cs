@@ -66,7 +66,7 @@ namespace IS2Mod.ControlTypes
         public int RoundedCorners { get; set; }
         public ElementColor BorderColor { get; set; }
         public ElementColor BackgroundColor { get; set; }
-        public SurfacePattern Pattern { get; set; }
+        public SurfacePattern? Pattern { get; set; }
         public RectangleBorderStyle[] HiddenBorders { get; set; }
 
         // NEW: Blur properties for Gaussian blur effect
@@ -78,10 +78,10 @@ namespace IS2Mod.ControlTypes
         public RectangleControl(
             int borderWidth = 1,
             int roundedCorners = 0,
-            ElementColor borderColor = null,
-            ElementColor backgroundColor = null,
-            SurfacePattern pattern = null,
-            RectangleBorderStyle[] hiddenBorders = null,
+            ElementColor? borderColor = null,
+            ElementColor? backgroundColor = null,
+            SurfacePattern? pattern = null,
+            RectangleBorderStyle[]? hiddenBorders = null,
             double blurRange = 0,
             int blurEdgeWidth = 0,
             string _Name = "",
@@ -114,6 +114,12 @@ namespace IS2Mod.ControlTypes
             Padding = BorderWidth;
         }
         #endregion
+
+        /// <summary>Border width in device pixels.</summary>
+        private double ScaledBorderWidth => BorderWidth * LayoutScale;
+
+        /// <summary>Corner radius in device pixels.</summary>
+        private double ScaledRoundedCorners => RoundedCorners * LayoutScale;
 
         #region Size Calculation
         public override PointD CalculateSize()
@@ -173,10 +179,16 @@ namespace IS2Mod.ControlTypes
             {
                 try
                 {
+                    // BlurPartial reads the pixel buffer, so the drawing above has to land in
+                    // it first - Cairo may still be holding it in the context.
+                    surface.Flush();
+
+                    // Blur radius is a geometric dimension, so it scales - the same way vanilla
+                    // uses GuiElement.scaled(9.0) for its dialog background blur.
                     SurfaceTransformBlur.BlurPartial(
                         surface,
-                        BlurRange,
-                        BlurEdgeWidth,
+                        BlurRange * LayoutScale,
+                        (int)Math.Round(BlurEdgeWidth * LayoutScale),
                         x,
                         y,
                         x + width,
@@ -193,7 +205,7 @@ namespace IS2Mod.ControlTypes
 
         private void RenderSquareBorders(Context ctx)
         {
-            ctx.LineWidth = BorderWidth;
+            ctx.LineWidth = ScaledBorderWidth;
 
             // Top border
             if (!HiddenBorders.Contains(RectangleBorderStyle.Top))
@@ -249,7 +261,7 @@ namespace IS2Mod.ControlTypes
                 BorderColor.GNormalized,
                 BorderColor.BNormalized,
                 BorderColor.ANormalized);
-            ctx.LineWidth = BorderWidth;
+            ctx.LineWidth = ScaledBorderWidth;
 
             // If all borders are visible, use the simple path
             if (HiddenBorders.Length == 0)
@@ -283,9 +295,9 @@ namespace IS2Mod.ControlTypes
                 if (hasLeft)
                 {
                     ctx.Arc(
-                        Position.X + RoundedCorners,
-                        Position.Y + RoundedCorners,
-                        RoundedCorners,
+                        Position.X + ScaledRoundedCorners,
+                        Position.Y + ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         180.0 * radians,
                         270.0 * radians);
                 }
@@ -295,15 +307,15 @@ namespace IS2Mod.ControlTypes
                 }
 
                 // Top line
-                ctx.LineTo(Position.X + Size.X - RoundedCorners, Position.Y);
+                ctx.LineTo(Position.X + Size.X - ScaledRoundedCorners, Position.Y);
 
                 // Top-right corner
                 if (hasRight)
                 {
                     ctx.Arc(
-                        Position.X + Size.X - RoundedCorners,
-                        Position.Y + RoundedCorners,
-                        RoundedCorners,
+                        Position.X + Size.X - ScaledRoundedCorners,
+                        Position.Y + ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         -90.0 * radians,
                         0.0 * radians);
                 }
@@ -324,27 +336,27 @@ namespace IS2Mod.ControlTypes
                 if (!hasTop)
                 {
                     ctx.Arc(
-                        Position.X + Size.X - RoundedCorners,
-                        Position.Y + RoundedCorners,
-                        RoundedCorners,
+                        Position.X + Size.X - ScaledRoundedCorners,
+                        Position.Y + ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         -90.0 * radians,
                         0.0 * radians);
                 }
                 else
                 {
-                    ctx.MoveTo(Position.X + Size.X, Position.Y + RoundedCorners);
+                    ctx.MoveTo(Position.X + Size.X, Position.Y + ScaledRoundedCorners);
                 }
 
                 // Right line
-                ctx.LineTo(Position.X + Size.X, Position.Y + Size.Y - RoundedCorners);
+                ctx.LineTo(Position.X + Size.X, Position.Y + Size.Y - ScaledRoundedCorners);
 
                 // Bottom-right corner
                 if (hasBottom)
                 {
                     ctx.Arc(
-                        Position.X + Size.X - RoundedCorners,
-                        Position.Y + Size.Y - RoundedCorners,
-                        RoundedCorners,
+                        Position.X + Size.X - ScaledRoundedCorners,
+                        Position.Y + Size.Y - ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         0.0 * radians,
                         90.0 * radians);
                 }
@@ -365,27 +377,27 @@ namespace IS2Mod.ControlTypes
                 if (!hasRight)
                 {
                     ctx.Arc(
-                        Position.X + Size.X - RoundedCorners,
-                        Position.Y + Size.Y - RoundedCorners,
-                        RoundedCorners,
+                        Position.X + Size.X - ScaledRoundedCorners,
+                        Position.Y + Size.Y - ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         0.0 * radians,
                         90.0 * radians);
                 }
                 else
                 {
-                    ctx.MoveTo(Position.X + Size.X - RoundedCorners, Position.Y + Size.Y);
+                    ctx.MoveTo(Position.X + Size.X - ScaledRoundedCorners, Position.Y + Size.Y);
                 }
 
                 // Bottom line
-                ctx.LineTo(Position.X + RoundedCorners, Position.Y + Size.Y);
+                ctx.LineTo(Position.X + ScaledRoundedCorners, Position.Y + Size.Y);
 
                 // Bottom-left corner
                 if (hasLeft)
                 {
                     ctx.Arc(
-                        Position.X + RoundedCorners,
-                        Position.Y + Size.Y - RoundedCorners,
-                        RoundedCorners,
+                        Position.X + ScaledRoundedCorners,
+                        Position.Y + Size.Y - ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         90.0 * radians,
                         180.0 * radians);
                 }
@@ -406,27 +418,27 @@ namespace IS2Mod.ControlTypes
                 if (!hasBottom)
                 {
                     ctx.Arc(
-                        Position.X + RoundedCorners,
-                        Position.Y + Size.Y - RoundedCorners,
-                        RoundedCorners,
+                        Position.X + ScaledRoundedCorners,
+                        Position.Y + Size.Y - ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         90.0 * radians,
                         180.0 * radians);
                 }
                 else
                 {
-                    ctx.MoveTo(Position.X, Position.Y + Size.Y - RoundedCorners);
+                    ctx.MoveTo(Position.X, Position.Y + Size.Y - ScaledRoundedCorners);
                 }
 
                 // Left line
-                ctx.LineTo(Position.X, Position.Y + RoundedCorners);
+                ctx.LineTo(Position.X, Position.Y + ScaledRoundedCorners);
 
                 // Top-left corner
                 if (hasTop)
                 {
                     ctx.Arc(
-                        Position.X + RoundedCorners,
-                        Position.Y + RoundedCorners,
-                        RoundedCorners,
+                        Position.X + ScaledRoundedCorners,
+                        Position.Y + ScaledRoundedCorners,
+                        ScaledRoundedCorners,
                         180.0 * radians,
                         270.0 * radians);
                 }
@@ -470,33 +482,33 @@ namespace IS2Mod.ControlTypes
 
             // Top-right corner
             ctx.Arc(
-                Position.X + Size.X - RoundedCorners,
-                Position.Y + RoundedCorners,
-                RoundedCorners,
+                Position.X + Size.X - ScaledRoundedCorners,
+                Position.Y + ScaledRoundedCorners,
+                ScaledRoundedCorners,
                 -90.0 * radians,
                 0.0 * radians);
 
             // Bottom-right corner
             ctx.Arc(
-                Position.X + Size.X - RoundedCorners,
-                Position.Y + Size.Y - RoundedCorners,
-                RoundedCorners,
+                Position.X + Size.X - ScaledRoundedCorners,
+                Position.Y + Size.Y - ScaledRoundedCorners,
+                ScaledRoundedCorners,
                 0.0 * radians,
                 90.0 * radians);
 
             // Bottom-left corner
             ctx.Arc(
-                Position.X + RoundedCorners,
-                Position.Y + Size.Y - RoundedCorners,
-                RoundedCorners,
+                Position.X + ScaledRoundedCorners,
+                Position.Y + Size.Y - ScaledRoundedCorners,
+                ScaledRoundedCorners,
                 90.0 * radians,
                 180.0 * radians);
 
             // Top-left corner
             ctx.Arc(
-                Position.X + RoundedCorners,
-                Position.Y + RoundedCorners,
-                RoundedCorners,
+                Position.X + ScaledRoundedCorners,
+                Position.Y + ScaledRoundedCorners,
+                ScaledRoundedCorners,
                 180.0 * radians,
                 270.0 * radians);
 

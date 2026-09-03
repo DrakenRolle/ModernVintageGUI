@@ -1,15 +1,15 @@
 using Cairo;
 using IS2Mod.ControlTypes.Renderer;
 using IS2Mod.Enums;
+using IS2Mod.Input;
 using System;
 using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
-using Vintagestory.Client;
-using Vintagestory.Client.NoObf;
 
 namespace IS2Mod.ControlTypes.Custom
 {
-    public class CustomDialogElement : UIControl, IDisposable, MouseEventHandler
+    public class CustomDialogElement : UIControl, IDisposable
     {
         #region Properties
         public string DialogName { get; set; }
@@ -17,12 +17,24 @@ namespace IS2Mod.ControlTypes.Custom
         public ICoreClientAPI Api { get; private set; }
         public bool IsVisible { get; private set; }
         public Vec2i MousePosition { get; set; }
+
+        /// <summary>
+        /// While this dialog is open the mouse cursor is released and world interaction is
+        /// suppressed. See <see cref="IS2Mod.Patches.ClientMainUpdateFreeMousePatch"/>.
+        /// </summary>
+        public bool PrefersUngrabbedMouse { get; set; } = true;
+
+        /// <summary>
+        /// Swallow clicks that land on the dialog background as well, so they do not fall
+        /// through to vanilla GUIs or to the world.
+        /// </summary>
+        public bool IsModal { get; set; } = true;
         #endregion
 
         #region Private Fields
-        private CustomUIRenderer _renderer;
+        private CustomUIRenderer? _renderer;
         private readonly string _rendererId;
-        private LoadedTexture _cursorTexture;
+        private LoadedTexture? _cursorTexture;
         private bool _isDisposed;
         #endregion
 
@@ -67,29 +79,27 @@ namespace IS2Mod.ControlTypes.Custom
         #region Rendering
         public void RenderDialog()
         {
-            // Dispose old texture
-            StaticElementsTexture?.Dispose();
+            int width = Math.Max(1, (int)Size.X);
+            int height = Math.Max(1, (int)Size.Y);
 
-            // Create new texture
-            StaticElementsTexture = new LoadedTexture(Api)
-            {
-                Width = (int)Size.X,
-                Height = (int)Size.Y
-            };
-
-            using (ImageSurface surface = new ImageSurface(Format.Argb32, (int)Size.X, (int)Size.Y))
+            using (ImageSurface surface = new ImageSurface(Format.Argb32, width, height))
             using (Context context = GuiElement.GenContext(surface))
             {
                 // Draw dialog background
                 DrawDialogBackground(context);
 
-                // Generate render data for all children
+                // Let every control draw itself onto the shared surface
                 GenerateRenderData(surface, context);
 
-                // Convert to texture
-                var cairoTexture = new LoadedTexture(Api);
-                Api.Gui.LoadOrUpdateCairoTexture(surface, linearMag: true, intoTexture: ref cairoTexture);
-                StaticElementsTexture = cairoTexture;
+                // The upload reads surface.DataPtr directly, so pending Cairo drawing
+                // operations have to be committed to the backing buffer first.
+                surface.Flush();
+
+                // A single upload of the finished surface. LoadOrUpdateCairoTexture reuses the
+                // GL texture of the passed LoadedTexture, so repeated refreshes do not leak.
+                LoadedTexture texture = StaticElementsTexture ?? new LoadedTexture(Api);
+                Api.Gui.LoadOrUpdateCairoTexture(surface, linearMag: true, intoTexture: ref texture);
+                StaticElementsTexture = texture;
             }
         }
 
@@ -136,27 +146,14 @@ namespace IS2Mod.ControlTypes.Custom
             if (IsVisible)
                 return;
 
-            // Setup hierarchy
-            CalculateChildrenRelationship();
-
-            // Release mouse
-            var client = (ClientMain)Api.World;
-            client.mouseOverrideGrab = true;
-            client.MouseGrabbed = false;
-
-            var platform = ((ClientPlatformWindows)ScreenManager.Platform);
-            platform.MouseGrabbed = false;
-
-            platform.mouseEventHandlers.Add(this);
-            // Update state
             IsVisible = true;
 
-            // Calculate layout (must happen after hierarchy is set up)
-            CalculateSize();
-            NormalizeChildrenByDelta();
-            CalculateAllPositions();
-            // Center on screen (after size is known)
-            CenterOnScreen();
+            PerformLayout();
+
+            // The mouse is deliberately not released here: UpdateFreeMouse would overwrite that
+            // on the very next frame. Registering with the UIManager makes the Harmony patch
+            // keep the cursor free for as long as this dialog stays open.
+            UIManager.Current?.RegisterDialog(this);
 
             Refresh();
         }
@@ -166,15 +163,16 @@ namespace IS2Mod.ControlTypes.Custom
             if (!IsVisible)
                 return;
 
-            // Restore mouse
-            var client = (ClientMain)Api.World;
-            client.mouseOverrideGrab = false;
-
-            var platform = ((ClientPlatformWindows)ScreenManager.Platform);
-            platform.MouseGrabbed = true;
-            platform.mouseEventHandlers.Remove(this);
-
             IsVisible = false;
+
+            // Drop stale hover/press state so a reopened dialog does not start out believing
+            // the cursor is still on the control it was on when it closed.
+            currentlyHovered = null;
+            pressedControl = null;
+
+            // No need to re-grab the mouse by hand: once no dialog is registered any more the
+            // patch stops interfering and UpdateFreeMouse restores the vanilla state on its own.
+            UIManager.Current?.UnregisterDialog(this);
         }
 
         public void Toggle()
@@ -190,6 +188,43 @@ namespace IS2Mod.ControlTypes.Custom
         public void SetPosition(double x, double y)
         {
             Position = new PointD(x, y);
+        }
+
+        /// <summary>
+        /// Runs the full layout pass. Children are laid out in dialog local space (root at
+        /// 0/0) because that is the space the Cairo surface is drawn in; only afterwards is the
+        /// dialog itself moved to its position on screen.
+        /// </summary>
+        public override void PerformLayout()
+        {
+            LayoutAt(RuntimeEnv.GUIScale);
+        }
+
+        private void LayoutAt(double scale)
+        {
+            LayoutScale = scale;
+
+            base.PerformLayout();
+            CenterOnScreen();
+        }
+
+        /// <summary>
+        /// Re-lays out and redraws the dialog for a changed GUI scale while it is open. Vanilla
+        /// does the same thing from its own watcher on that setting - it calls
+        /// GuiComposers.MarkAllDialogsForRecompose(), which our dialogs are not part of.
+        ///
+        /// The new value is passed in rather than read from RuntimeEnv.GUIScale: the game
+        /// updates that field from its own watcher on the same setting, and watchers run in
+        /// registration order, so ours may well run first and still see the old value.
+        /// </summary>
+        public void OnGuiScaleChanged(double newScale)
+        {
+            // A hidden dialog needs no work - Show() lays it out at the scale current then.
+            if (!IsVisible || _isDisposed)
+                return;
+
+            LayoutAt(newScale);
+            Refresh();
         }
 
         /// <summary>
@@ -212,80 +247,85 @@ namespace IS2Mod.ControlTypes.Custom
 
         public void Refresh()
         {
+            if (!IsVisible)
+                return;
+
             RenderDialog();
         }
         #endregion
 
-        #region Mouse Event Handlers (Placeholder implementations)
+        #region Mouse Event Handling
 
-        // Fixed Mouse Event Handlers for CustomDialogElement
+        private UIControl? currentlyHovered = null;
+        private UIControl? pressedControl = null;
 
-        private UIControl currentlyHovered = null;
-        private UIControl pressedControl = null;
-
-        public void OnMouseDown(MouseEvent e)
+        /// <summary>
+        /// Screen space bounds test. The Position of the dialog is in screen coordinates while
+        /// all of its descendants live in dialog local coordinates.
+        /// </summary>
+        public bool ContainsScreenPoint(double screenX, double screenY)
         {
-            UIControl clickedControl = HitTest(e.X, e.Y);
+            return screenX >= Position.X &&
+                   screenX <= Position.X + Size.X &&
+                   screenY >= Position.Y &&
+                   screenY <= Position.Y + Size.Y;
+        }
 
-            if (clickedControl != null)
+        public void HandleMouseDown(MouseEvent e)
+        {
+            if (!IsVisible)
+                return;
+
+            UIControl? clickedControl = HitTest(e.X, e.Y);
+            pressedControl = clickedControl;
+
+            clickedControl?.InvokeEventMouseDown(e);
+
+            if (clickedControl != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
             {
-                pressedControl = clickedControl;
-                clickedControl.InvokeEventMouseDown(e);
                 e.Handled = true;
-            }
-            else
-            {
-                pressedControl = null;
-                // Clicked outside controls or outside dialog
             }
         }
 
-        public void OnMouseUp(MouseEvent e)
+        public void HandleMouseUp(MouseEvent e)
         {
-            UIControl releasedControl = HitTest(e.X, e.Y);
+            if (!IsVisible)
+                return;
 
-            // Invoke mouse up on the control under cursor
-            if (releasedControl != null)
-            {
-                releasedControl.InvokeEventMouseUp(e);
-                e.Handled = true;
-            }
+            UIControl? releasedControl = HitTest(e.X, e.Y);
 
-            // Check if this is a complete click (mouse down and up on same control)
-            if (pressedControl != null && releasedControl == pressedControl)
+            releasedControl?.InvokeEventMouseUp(e);
+
+            // A click is only complete when press and release happened on the same control
+            if (pressedControl != null && ReferenceEquals(releasedControl, pressedControl))
             {
                 pressedControl.InvokeEventClicked(e);
-                e.Handled = true;
             }
 
-            // Clear pressed state
             pressedControl = null;
+
+            if (releasedControl != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
+            {
+                e.Handled = true;
+            }
         }
 
-        public void OnMouseMove(MouseEvent e)
+        public void HandleMouseMove(MouseEvent e)
         {
-            UIControl controlUnderMouse = HitTest(e.X, e.Y);
+            if (!IsVisible)
+                return;
 
-            // Check if we moved to a different control
-            if (controlUnderMouse != currentlyHovered)
+            MousePosition = new Vec2i(e.X, e.Y);
+
+            UIControl? controlUnderMouse = HitTest(e.X, e.Y);
+
+            if (!ReferenceEquals(controlUnderMouse, currentlyHovered))
             {
-                // Mouse left previous control
-                if (currentlyHovered != null)
-                {
-                    currentlyHovered.InvokeEventExit(e);
-                }
-
-                // Mouse entered new control
-                if (controlUnderMouse != null)
-                {
-                    controlUnderMouse.InvokeEventEnter(e);
-                }
-
-                // Update current hover state
+                currentlyHovered?.InvokeEventExit(e);
+                controlUnderMouse?.InvokeEventEnter(e);
                 currentlyHovered = controlUnderMouse;
             }
 
-            // Always invoke mouse move on currently hovered control
             if (currentlyHovered != null)
             {
                 currentlyHovered.InvokeEventMouseMove(e);
@@ -293,9 +333,32 @@ namespace IS2Mod.ControlTypes.Custom
             }
         }
 
-        public void OnMouseWheel(MouseWheelEventArgs e)
+        /// <summary>
+        /// Sends Exit to the currently hovered control and forgets it. Used when the cursor
+        /// moves somewhere this dialog no longer receives events from, e.g. onto a vanilla GUI.
+        /// </summary>
+        public void ClearHoverState(MouseEvent e)
         {
-            // Use current hovered control for mouse wheel events
+            if (currentlyHovered == null)
+                return;
+
+            currentlyHovered.InvokeEventExit(e);
+            currentlyHovered = null;
+        }
+
+        /// <summary>
+        /// Forgets an in-progress press without completing it as a click.
+        /// </summary>
+        public void CancelPress()
+        {
+            pressedControl = null;
+        }
+
+        public void HandleMouseWheel(MouseWheelEventArgs e)
+        {
+            if (!IsVisible)
+                return;
+
             if (currentlyHovered != null)
             {
                 currentlyHovered.InvokeEventMouseWheel(e);
@@ -318,27 +381,21 @@ namespace IS2Mod.ControlTypes.Custom
 
             if (disposing)
             {
-                // Unregister renderer
+                // Hide first: it only touches managed state and has to run before the renderer
+                // and the textures are gone.
+                if (IsVisible)
+                    Hide();
+
                 UnregisterRenderer();
 
-                // Dispose textures
                 StaticElementsTexture?.Dispose();
                 StaticElementsTexture = null;
 
                 _cursorTexture?.Dispose();
                 _cursorTexture = null;
-
-                // Hide if visible
-                if (IsVisible)
-                    Hide();
             }
 
             _isDisposed = true;
-        }
-
-        ~CustomDialogElement()
-        {
-            Dispose(false);
         }
         #endregion
     }

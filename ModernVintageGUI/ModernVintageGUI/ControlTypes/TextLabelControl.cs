@@ -31,7 +31,7 @@ namespace IS2Mod.ControlTypes
         public FontWeight FontWeight { get; set; }
         public FontSlant FontSlant { get; set; }
         public ElementColor TextColor { get; set; }
-        public TextOrientation Orientation { get; set; }
+        public new TextOrientation Orientation { get; set; }
         public bool WordWrap { get; set; }
         public int LineHeight { get; set; }
         #endregion
@@ -43,7 +43,7 @@ namespace IS2Mod.ControlTypes
             int fontSize = 16,
             FontWeight fontWeight = FontWeight.Normal,
             FontSlant fontSlant = FontSlant.Normal,
-            ElementColor textColor = null,
+            ElementColor? textColor = null,
             TextOrientation orientation = TextOrientation.Left,
             bool wordWrap = false,
             int lineHeight = 20,
@@ -83,20 +83,61 @@ namespace IS2Mod.ControlTypes
         }
         #endregion
 
+        /// <summary>Font size in device pixels.</summary>
+        private double ScaledFontSize => FontSize * LayoutScale;
+
+        /// <summary>Line height in device pixels.</summary>
+        private double ScaledLineHeight => LineHeight * LayoutScale;
+
         #region Size Calculation
         public override PointD CalculateSize()
         {
-            // If size is explicitly set, use it
-            if (Size.X > 0 && Size.Y > 0)
+            // An explicitly assigned size wins - that is how ButtonControl stretches its label
+            // across the whole button.
+            //
+            // The decision must be made on IsAutoSize, NOT on "Size.X > 0 && Size.Y > 0": a
+            // measurement writes its result into Size, so that condition is true from the
+            // second layout pass onwards. The label then fell through to the base
+            // implementation, which sums up child sizes - and a label has no children, so it
+            // collapsed to 0x0 (plus padding) every time the dialog was laid out again.
+            //
+            // A label that is not auto-sizing but has no size yet (the state ButtonControl
+            // creates it in) still has to measure itself, otherwise the button would size
+            // itself to a zero-width label.
+            //
+            // ExplicitSize, not Size: Size is what the arrange pass produced (stretched,
+            // clipped), so measuring against it would let the label inherit the width it was
+            // stretched to and never shrink back.
+            if (!IsAutoSize && ExplicitSize.X > 0 && ExplicitSize.Y > 0)
             {
-                return base.CalculateSize();
+                CalculatedSize = ScaledExplicitSize;
+                SetLayoutSize(CalculatedSize);
+                return CalculatedSize;
             }
 
+            PointD measured = MeasureText();
+
+            CalculatedSize = measured;
+
+            // SetLayoutSize, not the Size setter. The setter would record the measurement as
+            // ExplicitSize, and from the next pass on this method would take the branch above
+            // and never measure again - so the box would keep the size it had when it was last
+            // measured while the text keeps being drawn at the current GUI scale.
+            SetLayoutSize(measured);
+
+            return measured;
+        }
+
+        /// <summary>
+        /// Measures the text without touching any state, so that repeated layout passes always
+        /// produce the same result.
+        /// </summary>
+        private PointD MeasureText()
+        {
             // If no text, return minimum size
             if (string.IsNullOrEmpty(Text))
             {
-                Size = new PointD(Padding * 2, Padding * 2 + FontSize);
-                return Size;
+                return new PointD(ScaledPadding * 2, ScaledPadding * 2 + ScaledFontSize);
             }
 
             // Measure text with Cairo
@@ -108,21 +149,19 @@ namespace IS2Mod.ControlTypes
                 if (WordWrap && Size.X > 0)
                 {
                     // Calculate wrapped text size
-                    PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (Padding * 2));
-                    Size = new PointD(Size.X, wrappedSize.Y + (Padding * 2));
+                    PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2));
+                    return new PointD(Size.X, wrappedSize.Y + (ScaledPadding * 2));
                 }
-                else
-                {
-                    // Calculate single-line text size
-                    TextExtents te = ctx.TextExtents(Text);
-                    Size = new PointD(
-                        te.Width + (Padding * 2),
-                        FontSize + (Padding * 2)
-                    );
-                }
-            }
 
-            return Size;
+                // Calculate single-line text size. XAdvance, not Width: Width is the inked
+                // bounding box and leaves out the side bearings, which makes the box too narrow
+                // for the text it is supposed to hold.
+                TextExtents te = ctx.TextExtents(Text);
+                return new PointD(
+                    te.XAdvance + (ScaledPadding * 2),
+                    ScaledFontSize + (ScaledPadding * 2)
+                );
+            }
         }
 
         private PointD CalculateWrappedTextSize(Context ctx, string text, double maxWidth)
@@ -140,11 +179,11 @@ namespace IS2Mod.ControlTypes
 
                 TextExtents te = ctx.TextExtents(testLine);
 
-                if (te.Width > maxWidth && currentLine.Length > 0)
+                if (te.XAdvance > maxWidth && currentLine.Length > 0)
                 {
                     // Line is too long, start new line
                     TextExtents lineTE = ctx.TextExtents(currentLine.ToString());
-                    maxLineWidth = Math.Max(maxLineWidth, lineTE.Width);
+                    maxLineWidth = Math.Max(maxLineWidth, lineTE.XAdvance);
                     lineCount++;
 
                     currentLine.Clear();
@@ -160,11 +199,11 @@ namespace IS2Mod.ControlTypes
             if (currentLine.Length > 0)
             {
                 TextExtents lineTE = ctx.TextExtents(currentLine.ToString());
-                maxLineWidth = Math.Max(maxLineWidth, lineTE.Width);
+                maxLineWidth = Math.Max(maxLineWidth, lineTE.XAdvance);
                 lineCount++;
             }
 
-            return new PointD(maxLineWidth, lineCount * LineHeight);
+            return new PointD(maxLineWidth, lineCount * ScaledLineHeight);
         }
         #endregion
 
@@ -196,7 +235,7 @@ namespace IS2Mod.ControlTypes
         private void SetupFont(Context ctx)
         {
             ctx.SelectFontFace(FontName, FontSlant, FontWeight);
-            ctx.SetFontSize(FontSize);
+            ctx.SetFontSize(ScaledFontSize);
         }
 
         private void DrawSingleLineText(Context ctx)
@@ -222,50 +261,50 @@ namespace IS2Mod.ControlTypes
             {
                 case TextOrientation.Left:
                 case TextOrientation.TopLeft:
-                    x = Position.X + Padding;
-                    y = Position.Y + Padding + baselineOffset;
+                    x = Position.X + ScaledPadding;
+                    y = Position.Y + ScaledPadding + baselineOffset;
                     break;
 
                 case TextOrientation.Center:
                 case TextOrientation.MiddleCenter:
-                    x = Position.X + (Size.X - te.Width) / 2;
+                    x = Position.X + (Size.X - te.XAdvance) / 2;
                     y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
                     break;
 
                 case TextOrientation.Right:
                 case TextOrientation.TopRight:
-                    x = Position.X + Size.X - te.Width - Padding;
-                    y = Position.Y + Padding + baselineOffset;
+                    x = Position.X + Size.X - te.XAdvance - ScaledPadding;
+                    y = Position.Y + ScaledPadding + baselineOffset;
                     break;
 
                 case TextOrientation.TopCenter:
-                    x = Position.X + (Size.X - te.Width) / 2;
-                    y = Position.Y + Padding + baselineOffset;
+                    x = Position.X + (Size.X - te.XAdvance) / 2;
+                    y = Position.Y + ScaledPadding + baselineOffset;
                     break;
 
                 case TextOrientation.MiddleLeft:
-                    x = Position.X + Padding;
+                    x = Position.X + ScaledPadding;
                     y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
                     break;
 
                 case TextOrientation.MiddleRight:
-                    x = Position.X + Size.X - te.Width - Padding;
+                    x = Position.X + Size.X - te.XAdvance - ScaledPadding;
                     y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
                     break;
 
                 case TextOrientation.BottomLeft:
-                    x = Position.X + Padding;
-                    y = Position.Y + Size.Y - Padding - fe.Descent;
+                    x = Position.X + ScaledPadding;
+                    y = Position.Y + Size.Y - ScaledPadding - fe.Descent;
                     break;
 
                 case TextOrientation.BottomCenter:
-                    x = Position.X + (Size.X - te.Width) / 2;
-                    y = Position.Y + Size.Y - Padding - fe.Descent;
+                    x = Position.X + (Size.X - te.XAdvance) / 2;
+                    y = Position.Y + Size.Y - ScaledPadding - fe.Descent;
                     break;
 
                 case TextOrientation.BottomRight:
-                    x = Position.X + Size.X - te.Width - Padding;
-                    y = Position.Y + Size.Y - Padding - fe.Descent;
+                    x = Position.X + Size.X - te.XAdvance - ScaledPadding;
+                    y = Position.Y + Size.Y - ScaledPadding - fe.Descent;
                     break;
             }
 
@@ -278,8 +317,8 @@ namespace IS2Mod.ControlTypes
             StringBuilder currentLine = new StringBuilder();
             Cairo.FontExtents fe = ctx.FontExtents;
             double baselineOffset = fe.Ascent;
-            double currentY = Position.Y + Padding + baselineOffset;
-            double maxWidth = Size.X - (Padding * 2);
+            double currentY = Position.Y + ScaledPadding + baselineOffset;
+            double maxWidth = Size.X - (ScaledPadding * 2);
 
             foreach (string word in words)
             {
@@ -289,14 +328,14 @@ namespace IS2Mod.ControlTypes
 
                 TextExtents te = ctx.TextExtents(testLine);
 
-                if (te.Width > maxWidth && currentLine.Length > 0)
+                if (te.XAdvance > maxWidth && currentLine.Length > 0)
                 {
                     // Draw current line and start new one
                     double x = GetWrappedLineX(ctx, currentLine.ToString());
                     ctx.MoveTo(x, currentY);
                     ctx.ShowText(currentLine.ToString());
 
-                    currentY += LineHeight;
+                    currentY += ScaledLineHeight;
                     currentLine.Clear();
                     currentLine.Append(word);
 
@@ -330,15 +369,15 @@ namespace IS2Mod.ControlTypes
                 TextOrientation.TopCenter or
                 TextOrientation.MiddleCenter or
                 TextOrientation.BottomCenter
-                    => Position.X + (Size.X - te.Width) / 2,
+                    => Position.X + (Size.X - te.XAdvance) / 2,
 
                 TextOrientation.Right or
                 TextOrientation.TopRight or
                 TextOrientation.MiddleRight or
                 TextOrientation.BottomRight
-                    => Position.X + Size.X - te.Width - Padding,
+                    => Position.X + Size.X - te.XAdvance - ScaledPadding,
 
-                _ => Position.X + Padding
+                _ => Position.X + ScaledPadding
             };
         }
         #endregion

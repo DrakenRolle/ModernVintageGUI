@@ -13,17 +13,16 @@ namespace IS2Mod.ControlTypes
     public abstract class UIControl : INotifyPropertyChanged
     {
         #region Events
-        public event PropertyChangedEventHandler PropertyChanged;
-        public event EventHandler OnAfterUIControllerBuilt;
+        public event PropertyChangedEventHandler? PropertyChanged;
 
-        public event EventHandler<MouseEventArgs> Clicked;
-        public event EventHandler<MouseEventArgs> Enter;
-        public event EventHandler<MouseEventArgs> Exit;
-        public event EventHandler<MouseEventArgs> MouseDown;
-        public event EventHandler<MouseEventArgs> MouseUp;
-        public event EventHandler<MouseEventArgs> MouseMove;
+        public event EventHandler<MouseEventArgs>? Clicked;
+        public event EventHandler<MouseEventArgs>? Enter;
+        public event EventHandler<MouseEventArgs>? Exit;
+        public event EventHandler<MouseEventArgs>? MouseDown;
+        public event EventHandler<MouseEventArgs>? MouseUp;
+        public event EventHandler<MouseEventArgs>? MouseMove;
 
-        public event EventHandler<Events.MouseWheelEventArgs> MouseWheel;
+        public event EventHandler<Events.MouseWheelEventArgs>? MouseWheel;
 
         public void InvokeEventClicked(MouseEvent vsArgs)
         {
@@ -65,8 +64,8 @@ namespace IS2Mod.ControlTypes
         #endregion
 
         #region Properties
-        private LoadedTexture _staticElementsTexture;
-        public LoadedTexture StaticElementsTexture
+        private LoadedTexture? _staticElementsTexture;
+        public LoadedTexture? StaticElementsTexture
         {
             get => _staticElementsTexture;
             set => _staticElementsTexture = value;
@@ -79,25 +78,27 @@ namespace IS2Mod.ControlTypes
             set => _children = value;
         }
 
-        private UIControl _parent;
-        public UIControl Parent
+        private UIControl? _parent;
+        public UIControl? Parent
         {
             get => _parent;
             set => SetProperty(ref _parent, value);
         }
 
-        private CustomDialogElement _dialog;
-        public CustomDialogElement Dialog
+        private CustomDialogElement? _dialog;
+        /// <summary>
+        /// The dialog this control belongs to, or null while the control is still detached.
+        /// Building a subtree before adding it to a dialog is a normal usage pattern, so this
+        /// returns null instead of throwing.
+        /// </summary>
+        public CustomDialogElement? Dialog
         {
             get
             {
                 if (_parent != null)
                     return _parent.Dialog;
 
-                if (_dialog != null)
-                    return _dialog;
-
-                throw new InvalidOperationException("Dialog not set and no Parent found to get Dialog from.");
+                return _dialog;
             }
             set => _dialog = value;
         }
@@ -110,11 +111,70 @@ namespace IS2Mod.ControlTypes
         }
 
         private PointD _size = new PointD(0, 0);
+        private PointD _explicitSize = new PointD(0, 0);
+
+        /// <summary>
+        /// The size this control currently occupies. Assigning it from outside declares a
+        /// wanted size (see <see cref="ExplicitSize"/>); the layout passes write it through
+        /// <see cref="SetLayoutSize"/> instead so that they do not overwrite that wish.
+        /// </summary>
         public PointD Size
         {
             get => _size;
-            set => _size = value;
+            set
+            {
+                _explicitSize = value;
+                _size = value;
+            }
         }
+
+        /// <summary>
+        /// The size that was last assigned from outside. This is the input of the measure pass
+        /// for controls with <see cref="IsAutoSize"/> = false and must never be written by the
+        /// layout itself - otherwise measuring would consume its own previous output and the
+        /// control would drift with every layout pass.
+        /// </summary>
+        protected PointD ExplicitSize => _explicitSize;
+
+        /// <summary>
+        /// Size assignment for the layout passes. Unlike the <see cref="Size"/> setter this
+        /// leaves <see cref="ExplicitSize"/> alone, so stretching and clipping stay repeatable.
+        /// </summary>
+        protected internal void SetLayoutSize(PointD size)
+        {
+            _size = size;
+        }
+
+        private double _layoutScale = 1.0;
+
+        /// <summary>
+        /// Device pixels per author unit, the same idea as GuiElement.scaled() in the vanilla
+        /// GUI: everything a caller specifies - Margin, Padding, Size, FontSize, BorderWidth -
+        /// is written in unscaled author units, and the layout multiplies by this on the way to
+        /// device pixels. Position, Size and CalculatedSize are therefore already device pixels,
+        /// which is what the renderer and the hit test need (mouse coordinates are device
+        /// pixels too), so nothing has to be transformed back.
+        ///
+        /// Only the value on the root of a tree matters; every control reports the root value.
+        /// <see cref="Custom.CustomDialogElement"/> keeps it in sync with RuntimeEnv.GUIScale,
+        /// the layout harness sets it by hand to render a scenario at several scales.
+        /// </summary>
+        public double LayoutScale
+        {
+            get => Parent?.LayoutScale ?? _layoutScale;
+            set => _layoutScale = value;
+        }
+
+        /// <summary>Margin in device pixels.</summary>
+        protected double ScaledMargin => Margin * LayoutScale;
+
+        /// <summary>Padding in device pixels.</summary>
+        protected double ScaledPadding => Padding * LayoutScale;
+
+        /// <summary>The size assigned from outside, in device pixels.</summary>
+        protected PointD ScaledExplicitSize => new PointD(
+            ExplicitSize.X * LayoutScale,
+            ExplicitSize.Y * LayoutScale);
 
         private bool _isAutoSize;
         public bool IsAutoSize
@@ -200,6 +260,7 @@ namespace IS2Mod.ControlTypes
             if (_Size.HasValue)
             {
                 _size = _Size.Value;
+                _explicitSize = _Size.Value;
                 _isAutoSize = _size.X == 0 && _size.Y == 0;
             }
             else
@@ -212,14 +273,36 @@ namespace IS2Mod.ControlTypes
         #endregion
 
         #region Rendering
+        /// <summary>
+        /// Draws this control and all of its children onto the shared Cairo surface of the
+        /// dialog. Do not upload anything to the GPU here - the dialog uploads the finished
+        /// surface exactly once per refresh in <see cref="CustomDialogElement.RenderDialog"/>.
+        /// </summary>
         public virtual void GenerateRenderData(ImageSurface surface, Context context)
         {
-            GuiElement.GenerateTexture(Dialog.Api, surface, ref Dialog.StaticElementsTexture.TextureId);
-
             foreach (var child in Children)
             {
                 child.GenerateRenderData(surface, context);
             }
+        }
+        #endregion
+
+        #region Layout
+        /// <summary>
+        /// Runs a full layout pass over this control and everything below it: measure, then
+        /// arrange (stretch, position, clip). Call this on the root of a tree.
+        ///
+        /// The pass is idempotent - running it twice on an unchanged tree has to produce the
+        /// same result. LayoutHarness verifies that; if you add a control, keep it that way:
+        /// measure must read <see cref="ExplicitSize"/>, never <see cref="Size"/>, and arrange
+        /// must write through <see cref="SetLayoutSize"/>, never through the Size setter.
+        /// </summary>
+        public virtual void PerformLayout()
+        {
+            CalculateChildrenRelationship();
+            CalculateSize();
+            NormalizeChildrenByDelta();
+            CalculateAllPositions();
         }
         #endregion
 
@@ -231,16 +314,16 @@ namespace IS2Mod.ControlTypes
                 child._parent = this;
                 child._dialog = this.Dialog;
 
-                if (child.Children.Count > 0)
-                {
-                    child.CalculateChildrenRelationship();
-                }
+                child.CalculateChildrenRelationship();
             }
 
+            // Detach first: this method runs on every Show(), and subscribing again without
+            // unsubscribing would fire the handler once per previous Show().
+            Children.CollectionChanged -= Children_CollectionChanged;
             Children.CollectionChanged += Children_CollectionChanged;
         }
 
-        private void Children_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        private void Children_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         {
             if (e.NewItems != null)
             {
@@ -266,13 +349,22 @@ namespace IS2Mod.ControlTypes
                 }
             }
 
-            Dialog?.CalculateSize();
             RecomposeToMain();
         }
 
+        /// <summary>
+        /// Re-runs layout and redraws the dialog. Sizes alone are not enough - positions and
+        /// the normalization pass depend on them, so a partial update would leave the tree in
+        /// an inconsistent state.
+        /// </summary>
         public void RecomposeToMain()
         {
-            Dialog?.Refresh();
+            CustomDialogElement? dialog = Dialog;
+            if (dialog == null || !dialog.IsVisible)
+                return;
+
+            dialog.PerformLayout();
+            dialog.Refresh();
         }
         #endregion
 
@@ -283,34 +375,32 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public virtual PointD CalculateSize()
         {
-            // If not auto-size and no children, use the fixed size
-            if (!IsAutoSize && Children.Count == 0)
-            {
-                _calculatedSize = new PointD(Size.X, Size.Y);
-                return _calculatedSize;
-            }
+            // Children are measured in both branches - the arrange pass needs their sizes even
+            // when they do not influence the size of this control.
+            PointD content = new PointD(0, 0);
 
-            PointD calculatedSize = IsAutoSize ? new PointD(0, 0) : new PointD(Size.X, Size.Y);
-
-            // First pass: Calculate initial sizes for all children
             foreach (UIControl child in Children)
             {
                 PointD childSize = child.CalculateSize();
                 PointD childSizeWithSpacing = GetChildSizeWithSpacing(child, childSize);
-                calculatedSize = MergeSizeByOrientation(childSizeWithSpacing, calculatedSize);
-            }
-            var padding = this.Padding * 2;
-            // Store calculated size before any constraints
-            calculatedSize = new PointD(calculatedSize.X+ padding, calculatedSize.Y+ padding);
-            _calculatedSize = calculatedSize;
-
-            // Update size if auto-sizing
-            if (IsAutoSize)
-            {
-                Size = calculatedSize;
+                content = MergeSizeByOrientation(childSizeWithSpacing, content);
             }
 
-            return calculatedSize;
+            // A fixed-size control measures to exactly the size it was given. Reading the
+            // current Size here instead of ExplicitSize is what used to make repeated layout
+            // passes grow the control: Size is also the output of the arrange pass, so every
+            // run folded the previous result plus the children plus the padding back in.
+            PointD measured = IsAutoSize
+                ? new PointD(content.X + ScaledPadding * 2, content.Y + ScaledPadding * 2)
+                : ScaledExplicitSize;
+
+            _calculatedSize = measured;
+
+            // Give the control a usable size right away. The arrange pass (normalization and
+            // clipping) refines it afterwards through SetLayoutSize.
+            SetLayoutSize(measured);
+
+            return measured;
         }
 
 
@@ -327,8 +417,8 @@ namespace IS2Mod.ControlTypes
                 return;
 
             // Calculate available content area (parent size minus padding)
-            double availableWidth = Size.X - (Padding * 2);
-            double availableHeight = Size.Y - (Padding * 2);
+            double availableWidth = Size.X - (ScaledPadding * 2);
+            double availableHeight = Size.Y - (ScaledPadding * 2);
 
             switch (InsideOrientation)
             {
@@ -363,14 +453,15 @@ namespace IS2Mod.ControlTypes
             foreach (UIControl child in Children)
             {
                 // Calculate width available for this child (subtract child's margins)
-                double childAvailableWidth = availableWidth - (child.Margin * 2);
+                double childAvailableWidth = availableWidth - (child.ScaledMargin * 2);
 
                 // Ensure we don't set negative or zero width
                 childAvailableWidth = Math.Max(1, childAvailableWidth);
 
-                // Update child size while preserving height
-                child.Size = new PointD(childAvailableWidth, child.Size.Y);
-                child._calculatedSize = new PointD(childAvailableWidth, child._calculatedSize.Y);
+                // Stretching is part of arranging, so it goes through SetLayoutSize and
+                // leaves the measured size (_calculatedSize) untouched - overwriting that
+                // would destroy the natural size the next measure pass builds on.
+                child.SetLayoutSize(new PointD(childAvailableWidth, child.Size.Y));
                 if (child.Children.Count > 0)
                 {
                     child.NormalizeChildrenByDelta();
@@ -387,14 +478,13 @@ namespace IS2Mod.ControlTypes
             foreach (UIControl child in Children)
             {
                 // Calculate height available for this child (subtract child's margins)
-                double childAvailableHeight = availableHeight - (child.Margin * 2);
+                double childAvailableHeight = availableHeight - (child.ScaledMargin * 2);
 
                 // Ensure we don't set negative or zero height
                 childAvailableHeight = Math.Max(1, childAvailableHeight);
 
-                // Update child size while preserving width
-                child.Size = new PointD(child.Size.X, childAvailableHeight);
-                child._calculatedSize = new PointD(child._calculatedSize.X, childAvailableHeight);
+                // Same as above: arrange writes the layout size, not the measured size.
+                child.SetLayoutSize(new PointD(child.Size.X, childAvailableHeight));
                 if (child.Children.Count > 0)
                 {
                     child.NormalizeChildrenByDelta();
@@ -407,7 +497,7 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         private PointD GetChildSizeWithSpacing(UIControl child, PointD childSize)
         {
-            double totalMargin = 2 * child.Margin;
+            double totalMargin = 2 * child.ScaledMargin;
             //double totalPadding = 2 * this.Padding;
 
             return new PointD(
@@ -465,7 +555,7 @@ namespace IS2Mod.ControlTypes
             // Calculate positions for all children
             for (int i = 0; i < Children.Count; i++)
             {
-                UIControl previousSibling = i > 0 ? Children[i - 1] : null;
+                UIControl? previousSibling = i > 0 ? Children[i - 1] : null;
                 Children[i].CalculatePosition(previousSibling);
                 Children[i].CalculateAllPositions();
             }
@@ -478,7 +568,7 @@ namespace IS2Mod.ControlTypes
         /// FIXED: Calculates the position of this control relative to its parent and siblings.
         /// Now correctly handles Orientation.Right to position on the right side.
         /// </summary>
-        public void CalculatePosition(UIControl previousSibling)
+        public void CalculatePosition(UIControl? previousSibling)
         {
             if (Parent == null)
             {
@@ -487,19 +577,19 @@ namespace IS2Mod.ControlTypes
             }
 
             // Calculate base position with parent padding and own margin
-            double posX = Parent.Position.X + Parent.Padding + Margin;
-            double posY = Parent.Position.Y + Parent.Padding + Margin;
+            double posX = Parent.Position.X + Parent.ScaledPadding + ScaledMargin;
+            double posY = Parent.Position.Y + Parent.ScaledPadding + ScaledMargin;
 
             // FIXED: Handle Orientation.Right - position from the right edge
             if (Orientation == Orientation.Right)
             {
-                posX = Parent.Position.X + Parent.Size.X - Size.X - Margin - Parent.Padding;
+                posX = Parent.Position.X + Parent.Size.X - Size.X - ScaledMargin - Parent.ScaledPadding;
             }
 
             // FIXED: Handle Orientation.Bottom - position from the bottom edge
             if (Orientation == Orientation.Bottom)
             {
-                posY = Parent.Position.Y + Parent.Size.Y - Size.Y - Margin - Parent.Padding;
+                posY = Parent.Position.Y + Parent.Size.Y - Size.Y - ScaledMargin - Parent.ScaledPadding;
             }
 
             // Adjust position based on previous sibling and parent orientation
@@ -510,13 +600,13 @@ namespace IS2Mod.ControlTypes
                     case Orientation.Top:
                     case Orientation.Bottom:
                         // Stack vertically - keep X, add to Y
-                        posY = previousSibling.Position.Y + previousSibling.Size.Y + previousSibling.Margin + Margin;
+                        posY = previousSibling.Position.Y + previousSibling.Size.Y + previousSibling.ScaledMargin + ScaledMargin;
                         break;
 
                     case Orientation.Left:
                     case Orientation.Right:
                         // Stack horizontally - add to X, keep Y
-                        posX = previousSibling.Position.X + previousSibling.Size.X + previousSibling.Margin + Margin;
+                        posX = previousSibling.Position.X + previousSibling.Size.X + previousSibling.ScaledMargin + ScaledMargin;
                         break;
                     case Orientation.None:
                         // Overlay - use parent position (already set above)
@@ -528,7 +618,11 @@ namespace IS2Mod.ControlTypes
             PointD clippedSize = CalculateClippedSize(posX, posY);
 
             Position = new PointD(posX, posY);
-            Size = clippedSize;
+
+            // Clipping is a layout result, not a wish - going through the Size setter here
+            // would turn the clipped value into the ExplicitSize that the next measure pass
+            // starts from, and the control would shrink a little more on every pass.
+            SetLayoutSize(clippedSize);
         }
 
         /// <summary>
@@ -542,24 +636,26 @@ namespace IS2Mod.ControlTypes
             }
 
             // Parent boundaries (accounting for padding)
-            double parentMinX = Parent.Position.X + Parent.Padding;
-            double parentMinY = Parent.Position.Y + Parent.Padding;
-            double parentMaxX = Parent.Position.X + Parent.Size.X - Parent.Padding;
-            double parentMaxY = Parent.Position.Y + Parent.Size.Y - Parent.Padding;
+            double parentMinX = Parent.Position.X + Parent.ScaledPadding;
+            double parentMinY = Parent.Position.Y + Parent.ScaledPadding;
+            double parentMaxX = Parent.Position.X + Parent.Size.X - Parent.ScaledPadding;
+            double parentMaxY = Parent.Position.Y + Parent.Size.Y - Parent.ScaledPadding;
 
-            // Start with calculated size
+            // Start from the size the control actually has after normalization. The overflow
+            // test used to look at _calculatedSize while clamping Size, so it asked about one
+            // box and cut a different one.
             double clippedWidth = Size.X;
             double clippedHeight = Size.Y;
 
             // Only clip if control starts outside bounds or extends significantly beyond
             // Don't clip right edge if control fits within reasonable margin tolerance
-            if (proposedX + _calculatedSize.X > parentMaxX + Margin)
+            if (proposedX + clippedWidth > parentMaxX + ScaledMargin)
             {
                 clippedWidth = Math.Max(0, parentMaxX - proposedX);
             }
 
             // Only clip bottom edge if control extends significantly beyond
-            if (proposedY + _calculatedSize.Y > parentMaxY + Margin)
+            if (proposedY + clippedHeight > parentMaxY + ScaledMargin)
             {
                 clippedHeight = Math.Max(0, parentMaxY - proposedY);
             }
@@ -588,77 +684,70 @@ namespace IS2Mod.ControlTypes
         /// <param name="screenX">Screen X coordinate</param>
         /// <param name="screenY">Screen Y coordinate</param>
         /// <returns>The deepest control at the given position, or null if none found</returns>
-        protected UIControl HitTest(int screenX, int screenY)
+        protected UIControl? HitTest(int screenX, int screenY)
         {
-            if (!IsPointInDialog(screenX, screenY))
+            // Only the root (the dialog) knows where the tree sits on screen. Everything below
+            // it was laid out in dialog local space, so convert once here and stay local.
+            double localX = screenX - Position.X;
+            double localY = screenY - Position.Y;
+
+            if (!ContainsLocalPoint(localX, localY))
             {
                 return null;
             }
 
-            // Convert screen coords to dialog-relative
-            double relativeX = screenX - Position.X;
-            double relativeY = screenY - Position.Y;
-
-            return HitTestRecursive(this, relativeX, relativeY);
+            return HitTestRecursive(this, localX, localY);
         }
 
         /// <summary>
-        /// Checks if a point is within the dialog's bounds (using absolute screen coordinates)
+        /// Checks whether a point given in dialog local coordinates lies inside this control.
+        /// The root of the tree is the exception: its Position holds the on screen position of
+        /// the whole dialog, while its own local rectangle always starts at 0/0.
         /// </summary>
-        protected bool IsPointInDialog(int screenX, int screenY)
+        public bool ContainsLocalPoint(double localX, double localY)
         {
-            return screenX >= Position.X &&
-                   screenX <= Position.X + Size.X &&
-                   screenY >= Position.Y &&
-                   screenY <= Position.Y + Size.Y;
-        }
-        /// <summary>
-        /// Recursively searches the control hierarchy to find the deepest control at the given position.
-        /// Returns the most specific (deepest) control, preferring children over parents.
-        /// Coordinates are relative to the current control's parent.
-        /// </summary>
-        protected virtual UIControl HitTestRecursive(UIControl control, double parentRelativeX, double parentRelativeY)
-        {
-            UIControl mostFittingChild = null;
+            double left = Parent == null ? 0 : Position.X;
+            double top = Parent == null ? 0 : Position.Y;
 
-            foreach (var item in control.Children)
+            return localX >= left &&
+                   localX <= left + Size.X &&
+                   localY >= top &&
+                   localY <= top + Size.Y;
+        }
+
+        /// <summary>
+        /// Recursively searches the control hierarchy for the deepest control at the given
+        /// dialog local position. Children are tested last to first so that controls drawn on
+        /// top of their siblings also win the hit test.
+        /// </summary>
+        protected virtual UIControl? HitTestRecursive(UIControl control, double localX, double localY)
+        {
+            if (!control.ContainsLocalPoint(localX, localY))
             {
-                var found = item.HitTestRecursive(item, parentRelativeX, parentRelativeY);
-                if (found != null)
+                return null;
+            }
+
+            for (int i = control.Children.Count - 1; i >= 0; i--)
+            {
+                UIControl child = control.Children[i];
+                UIControl? hit = child.HitTestRecursive(child, localX, localY);
+                if (hit != null)
                 {
-                    mostFittingChild = found;
-                    break;
+                    return hit;
                 }
             }
 
-            if (mostFittingChild == null && IsPointInDialog((int)parentRelativeX, (int)parentRelativeY))
-            {
-                mostFittingChild = control;
-            }
-
-            return mostFittingChild;
-        }
-
-        /// <summary>
-        /// Checks if a point is within a control's bounds.
-        /// The point coordinates are relative to the control's parent.
-        /// </summary>
-        protected bool IsPointInControlAbsolute(UIControl control, double screenX, double screenY)
-        {
-            return screenX >= control.Position.X &&
-                   screenX <= control.Position.X + control.Size.X &&
-                   screenY >= control.Position.Y &&
-                   screenY <= control.Position.Y + control.Size.Y;
+            return control;
         }
         #endregion
 
         #region Property Change Notification
-        protected void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string propertyName = null)
+        protected void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
-        protected bool SetProperty<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string propertyName = null)
+        protected bool SetProperty<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
         {
             if (System.Collections.Generic.EqualityComparer<T>.Default.Equals(field, value))
                 return false;

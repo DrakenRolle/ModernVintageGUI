@@ -8,15 +8,11 @@ namespace IS2Mod.ControlTypes
 {
     public class ButtonControl : UIControl
     {
-        private RectangleControl _border;
-        private RectangleControl _borderLeft;
-        private RectangleControl _borderRight;
-        private RectangleControl _borderTop;
-        private RectangleControl _borderBottom;
+        private readonly RectangleControl _border = CreateBorder();
+        private readonly RectangleControl _borderTop = CreateBorderTop();
+        private readonly RectangleControl _borderBottom = CreateBorderBottom();
 
-        private TextLabelControl _textLabel;
-        private bool _isPressed = false;
-        private bool _isHovered = false;
+        private readonly TextLabelControl _textLabel = CreateTextLabel();
 
         public string Text
         {
@@ -36,35 +32,41 @@ namespace IS2Mod.ControlTypes
             InitializeComponents();
         }
 
-        private void InitializeComponents()
+        private static RectangleControl CreateBorder()
         {
-            _border = new RectangleControl(
+            return new RectangleControl(
                 _Orientation: Orientation.Top
-                
             );
+        }
 
-            // FIXED: Removed margin from border overlays - they should align with the button bounds
-            _borderBottom = new RectangleControl(
+        // FIXED: Removed margin from border overlays - they should align with the button bounds
+        private static RectangleControl CreateBorderBottom()
+        {
+            return new RectangleControl(
                 borderWidth: 3,
                 _Margin: 0,  // Changed from 10 to 0
                 borderColor: new ElementColor(new double[] { 0.0, 0.0, 0.0, 0.3 }),
                 _Orientation: Orientation.None,  // Changed to None so it overlays
                 hiddenBorders: new RectangleBorderStyle[] { RectangleBorderStyle.Left, RectangleBorderStyle.Top }
             );
+        }
 
-            _borderTop = new RectangleControl(
+        private static RectangleControl CreateBorderTop()
+        {
+            return new RectangleControl(
                 borderWidth: 4,
                 _Margin: 0,  // Changed from 10 to 0
                 borderColor: new ElementColor(new double[] { 1.0, 1.0, 1.0, 0.3 }),
                 _Orientation: Orientation.None,  // Changed to None so it overlays
-                hiddenBorders: new RectangleBorderStyle[] { RectangleBorderStyle.Bottom, RectangleBorderStyle.Right }, blurEdgeWidth: 3,blurRange: 3
+                hiddenBorders: new RectangleBorderStyle[] { RectangleBorderStyle.Bottom, RectangleBorderStyle.Right }, blurEdgeWidth: 3, blurRange: 3
             );
+        }
 
-            Children.Add(_border);
-
-            // Create text label - will auto-size initially, then fill border
+        // Create text label - will auto-size initially, then fill border
+        private static TextLabelControl CreateTextLabel()
+        {
             var buttonFont = CairoFont.ButtonText();
-            _textLabel = new TextLabelControl(
+            var label = new TextLabelControl(
                 text: "Button",
                 fontName: buttonFont.Fontname,
                 fontSize: (int)buttonFont.UnscaledFontsize,
@@ -74,14 +76,19 @@ namespace IS2Mod.ControlTypes
                 orientation: TextOrientation.MiddleCenter,
                 wordWrap: false,
                 padding: 5,
-                _Margin: 0,               
+                _Margin: 0,
                 _Orientation: Orientation.None  // None so it fills the border area
             );
-            _textLabel.IsAutoSize = false;
+            label.IsAutoSize = false;
+            return label;
+        }
+
+        private void InitializeComponents()
+        {
+            Children.Add(_border);
+
             _border.Children.Add(_borderTop);
             _border.Children.Add(_borderBottom);
-
-
             _border.Children.Add(_textLabel);
 
             this.Clicked += ButtonControl_Clicked;
@@ -99,7 +106,7 @@ namespace IS2Mod.ControlTypes
             _border.BackgroundColor.A = (byte)(0.1 * 255);
             _border.BlurEdgeWidth = 3;
             _border.BlurRange = 3;
-            Dialog.Refresh();
+            Dialog?.Refresh();
 
         }
 
@@ -111,7 +118,7 @@ namespace IS2Mod.ControlTypes
             _border.BackgroundColor.A = (byte)(0.3 * 255);
             _border.BlurEdgeWidth = 3;
             _border.BlurRange = 3;
-            Dialog.Refresh();
+            Dialog?.Refresh();
 
         }
 
@@ -123,7 +130,7 @@ namespace IS2Mod.ControlTypes
             _borderBottom.BorderWidth = 3;
             _border.BlurEdgeWidth = 3;
             _border.BlurRange = 0;
-            Dialog.Refresh();
+            Dialog?.Refresh();
             Debug.WriteLine("Button Exit");
         }
 
@@ -137,7 +144,7 @@ namespace IS2Mod.ControlTypes
             _border.BlurRange = 3;
 
 
-            Dialog.Refresh();
+            Dialog?.Refresh();
             Debug.WriteLine("Button Enter");
         }
 
@@ -146,24 +153,25 @@ namespace IS2Mod.ControlTypes
             Debug.WriteLine("Button Clicked");
         }
 
-        protected override UIControl HitTestRecursive(UIControl control, double relativeX, double relativeY)
+        /// <summary>
+        /// A button is an atomic hit target: its border and label children must never become
+        /// the hovered/pressed control, otherwise the visual state handlers below never fire.
+        /// </summary>
+        protected override UIControl? HitTestRecursive(UIControl control, double localX, double localY)
         {
-            // Check if point is within this control's bounds
-            if (!IsPointInDialog((int)relativeX, (int)relativeY))
-            {
-                return null;
-            }
-
-            // No children contain the point, so this control is the hit target
-            // Don't return the dialog itself as a hit target
-            return control;
+            return control.ContainsLocalPoint(localX, localY) ? control : null;
         }
         public override PointD CalculateSize()
         {
             if(IsAutoSize == false)
             {
-                // If not auto-sizing, just return current size
-                return base.Size;
+                // If not auto-sizing, the assigned size is the measurement - converted to device
+                // pixels, like every other authored dimension. CalculatedSize has to be kept in
+                // sync: CalculateClippedSize uses it to decide whether the control overflows its
+                // parent, and a stale 0 there makes that check meaningless.
+                CalculatedSize = ScaledExplicitSize;
+                SetLayoutSize(CalculatedSize);
+                return CalculatedSize;
             }
             // Let base calculate size normally
             PointD size = base.CalculateSize();
@@ -171,11 +179,11 @@ namespace IS2Mod.ControlTypes
             // Force all children to match button size exactly
             if (_border != null && _textLabel != null)
             {
-                _border.Size = this.Size;
-                _textLabel.Size = this.Size;
+                _border.SetLayoutSize(this.Size);
+                _textLabel.SetLayoutSize(this.Size);
                 _textLabel.IsAutoSize = false;
-                _borderTop.Size = this.Size;
-                _borderBottom.Size = this.Size;
+                _borderTop.SetLayoutSize(this.Size);
+                _borderBottom.SetLayoutSize(this.Size);
             }
             return size;
         }
@@ -185,10 +193,10 @@ namespace IS2Mod.ControlTypes
             if (_border != null && _textLabel != null)
             {
                 // Force all sizes to match button size
-                _border.Size = this.Size;
-                _textLabel.Size = this.Size;
-                _borderTop.Size = this.Size;
-                _borderBottom.Size = this.Size;
+                _border.SetLayoutSize(this.Size);
+                _textLabel.SetLayoutSize(this.Size);
+                _borderTop.SetLayoutSize(this.Size);
+                _borderBottom.SetLayoutSize(this.Size);
 
                 // Force all positions to match border position (overlay)
                 _border.Position = this.Position;
@@ -206,16 +214,16 @@ namespace IS2Mod.ControlTypes
             // Override all positions and sizes after layout
             if (_border != null && _textLabel != null)
             {
-                _border.Size = this.Size;
+                _border.SetLayoutSize(this.Size);
                 _border.Position = this.Position;
 
-                _textLabel.Size = this.Size;
+                _textLabel.SetLayoutSize(this.Size);
                 _textLabel.Position = _border.Position;
 
-                _borderTop.Size = this.Size;
+                _borderTop.SetLayoutSize(this.Size);
                 _borderTop.Position = _border.Position;
 
-                _borderBottom.Size = this.Size;
+                _borderBottom.SetLayoutSize(this.Size);
                 _borderBottom.Position = _border.Position;
             }
         }

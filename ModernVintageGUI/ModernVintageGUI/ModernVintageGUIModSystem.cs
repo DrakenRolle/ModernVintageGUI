@@ -1,6 +1,7 @@
-﻿using IS2Mod.ControlTypes;
+using HarmonyLib;
+using IS2Mod.ControlTypes;
 using IS2Mod.ControlTypes.Custom;
-using System;
+using IS2Mod.Input;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
@@ -10,16 +11,19 @@ namespace ModernVintageGUI
 {
     public class ModernVintageGUIModSystem : ModSystem
     {
+        public const string HarmonyId = "modernvintagegui";
+        private const string TestDialogHotkey = "mvgui_testdialog";
 
-        private ICoreClientAPI clientApi;
+        private ICoreClientAPI? clientApi;
+        private Harmony? harmony;
+        private UIManager? uiManager;
+        private CustomDialogElement? dialog;
 
         // Called on server and client
         // Useful for registering block/entity classes on both sides
         public override void Start(ICoreAPI api)
         {
             Mod.Logger.Notification("Hello from template mod: " + api.Side);
-
-
         }
 
         public override void StartServerSide(ICoreServerAPI api)
@@ -31,32 +35,48 @@ namespace ModernVintageGUI
         {
             this.clientApi = api;
 
-            // Registriere das Keyboard Event
-            api.Input.RegisterHotKey("openmydialog", "Open My Test Dialog", GlKeys.LControl, HotkeyType.GUIOrOtherControls);
-            api.Input.SetHotKeyHandler("openmydialog", OnDialogHotkey);
+            // Patches ClientMain.UpdateFreeMouse so the cursor stays free while a custom dialog
+            // is open. Without it the game re-grabs the mouse on the next rendered frame.
+            harmony = new Harmony(HarmonyId);
+            harmony.PatchAll(typeof(ModernVintageGUIModSystem).Assembly);
+
+            // Routes mouse input from the client event API into the open dialogs
+            uiManager = new UIManager(api);
+
+            api.Input.RegisterHotKey(TestDialogHotkey, "Toggle ModernVintageGUI test dialog", GlKeys.J, HotkeyType.GUIOrOtherControls);
+            api.Input.SetHotKeyHandler(TestDialogHotkey, OnDialogHotkey);
         }
-        CustomDialogElement dialog;
-        GuiElementTextButton button;
-        //GuiDialog
+
         private bool OnDialogHotkey(KeyCombination keyCombination)
         {
-            if (dialog != null)
+            if (clientApi == null)
             {
-                dialog.Dispose();
+                return false;
             }
-            // Create a dialog
-            dialog = new CustomDialogElement(clientApi, "myDialog", "My Title");
 
-            // Add a button
+            if (dialog == null)
+            {
+                dialog = BuildTestDialog(clientApi);
+            }
+
+            dialog.Toggle();
+
+            return true; // true = event was handled
+        }
+
+        private static CustomDialogElement BuildTestDialog(ICoreClientAPI capi)
+        {
+            var testDialog = new CustomDialogElement(capi, "myDialog", "My Title");
+
             var button = new ButtonControl(_Name: "saveButton");
             button.Text = "Save";
-            dialog.Children.Add(button);
+            testDialog.Children.Add(button);
 
             var button2 = new ButtonControl(_Name: "saveButton2");
             button2.Text = "Save";
             button2.Size = new Cairo.PointD(150, 150);
             button2.IsAutoSize = false;
-            dialog.Children.Add(button2);
+            testDialog.Children.Add(button2);
 
             RectangleControl rect = new RectangleControl();
             rect.InsideOrientation = IS2Mod.Enums.Orientation.Left;
@@ -81,19 +101,25 @@ namespace ModernVintageGUI
             button2345.Text = "Test";
             rect.Children.Add(button2345);
 
-            //RectangleControl rect2 = new RectangleControl();
-            //rect.InsideOrientation = Enums.Orientation.Right;
-            //rect2.Children.Add(button2345);
+            testDialog.Children.Add(rect);
 
+            return testDialog;
+        }
 
+        public override void Dispose()
+        {
+            dialog?.Dispose();
+            dialog = null;
 
-            dialog.Children.Add(rect);
-            //dialog.Children.Add(rect2);
-            // Show the dialog
-            dialog.Show();
+            uiManager?.Dispose();
+            uiManager = null;
 
-            return true; // true = Event wurde behandelt        }
+            // Leaving the patch in place across a world reload would keep a stale UIManager
+            // reference alive and patch the next ClientMain as well.
+            harmony?.UnpatchAll(HarmonyId);
+            harmony = null;
 
+            base.Dispose();
         }
     }
 }

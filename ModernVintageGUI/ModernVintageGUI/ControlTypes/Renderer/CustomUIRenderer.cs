@@ -37,23 +37,19 @@ namespace IS2Mod.ControlTypes.Renderer
         public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
         {
             // Only render if dialog is visible and has a valid texture
-            if (!ShouldRender())
+            LoadedTexture? texture = _dialog.StaticElementsTexture;
+
+            // Only render if dialog is visible and has a valid texture
+            if (!_dialog.IsVisible || texture == null || texture.TextureId == 0)
                 return;
 
-            RenderDialogTexture();
+            RenderDialogTexture(texture);
         }
 
-        private bool ShouldRender()
-        {
-            return _dialog.IsVisible &&
-                   _dialog.StaticElementsTexture != null &&
-                   _dialog.StaticElementsTexture.TextureId != 0;
-        }
-
-        private void RenderDialogTexture()
+        private void RenderDialogTexture(LoadedTexture texture)
         {
             _api.Render.RenderTexture(
-                _dialog.StaticElementsTexture.TextureId,
+                texture.TextureId,
                 _dialog.Position.X,
                 _dialog.Position.Y,
                 _dialog.Size.X,
