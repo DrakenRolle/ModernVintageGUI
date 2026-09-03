@@ -6,8 +6,9 @@ interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for shor
 
 <img src="docs/images/readme-title-bar.png" alt="A dialog with a vanilla style title bar" />
 
-> **Full control reference:** [docs/Controls.md](docs/Controls.md) - every control in detail, the
-> layout rules, GUI scale, events, focus and depth, and how to write your own control.
+> **Full documentation:** the [wiki](https://github.com/DrakenRolle/ModernVintageGUI/wiki) - every
+> control in detail, the layout rules, GUI scale, events, focus and depth, and how to write your
+> own control.
 
 <h2>Goals of this Project</h2>
 
@@ -83,7 +84,7 @@ And add it as a Reference to your Mod Project.
 
 That is all - MVS_UI initialises itself. **Do not** apply the Harmony patch or create a `UIManager`
 in your own mod, and **do not** bundle a copy of the assembly; see
-[why](docs/Controls.md#uimanager).
+[why](https://github.com/DrakenRolle/ModernVintageGUI/wiki/Input-Focus-and-Rendering).
 
 <h2>A dialog</h2>
 
