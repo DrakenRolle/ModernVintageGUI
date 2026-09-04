@@ -4,7 +4,10 @@ This is an approach to fix the current GUI system for Vintage Story.
 The core idea of this framework is a stack-container based way to structure and maintain a user
 interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for short.
 
-<img src="docs/images/readme-title-bar.png" alt="A dialog with a vanilla style title bar" />
+<img src="docs/images/readme-showcase.png" alt="A dialog showing every control: labels, buttons, a context menu opener, a scrolling list and an inventory grid" />
+
+*Every control in one dialog. This picture is rendered from the same code the test hotkey opens
+in game, so it cannot show a screen that no longer exists.*
 
 > **Full documentation:** the [wiki](https://github.com/DrakenRolle/ModernVintageGUI/wiki) - every
 > control in detail, the layout rules, GUI scale, events, focus and depth, and how to write your
@@ -48,8 +51,15 @@ interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for shor
 * **A headless layout harness** that renders the UI to PNG and checks the layout invariants without
   starting the game
 
+* **Clipping and scrolling.** A container can cut what its children draw at its own edge, and any
+  container can grow a vanilla styled scrollbar on either axis - the bars hang on the container
+  rather than being controls of their own
+* **Two drawing passes.** The control tree goes onto one Cairo surface, and anything that cannot -
+  an item stack, drawn from the item atlas with its own shader - is drawn on top per frame, the
+  same split the vanilla GUI makes
+
 **Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
-`TitleBarControl`.
+`TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`.
 
 <h2>What is still ongoing</h2>
 

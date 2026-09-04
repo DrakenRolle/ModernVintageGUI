@@ -72,6 +72,57 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "clipping",
+                Description = "Two clipping containers of the same fixed height. The left one "
+                            + "holds more rows than fit and is cut, the right one fits and looks "
+                            + "untouched.",
+                Build = BuildClipping
+            };
+
+            yield return new Scenario
+            {
+                Name = "scroll-vertical",
+                Description = "A fixed height container with more rows than fit and a vertical "
+                            + "scrollbar, scrolled a third of the way down. Track and handle are "
+                            + "drawn with the values from GuiElementScrollbar.",
+                Build = () => BuildScrolling(vertical: true, horizontal: false)
+            };
+
+            yield return new Scenario
+            {
+                Name = "scroll-both",
+                Description = "The same container with content too wide as well, so both bars "
+                            + "show and each viewport axis loses the other bar's strip.",
+                Build = () => BuildScrolling(vertical: true, horizontal: true)
+            };
+
+            yield return new Scenario
+            {
+                Name = "showcase",
+                Description = "The dialog the test hotkey opens: every control the framework "
+                            + "has, built by the same code that builds it in game.",
+                Build = BuildShowcase
+            };
+
+            yield return new Scenario
+            {
+                Name = "inventory-grid",
+                Description = "A 6 by 3 inventory grid on the vanilla lattice: 48 unit slots "
+                            + "with a 3 unit gap, no gap at the edges.",
+                Build = BuildInventoryGrid
+            };
+
+            yield return new Scenario
+            {
+                Name = "inventory-grid-scrolling",
+                Description = "The same grid with 8 rows in a window only 3 rows tall, scrolled "
+                            + "one row down - the case the whole clipping and scrolling work is "
+                            + "for.",
+                Build = BuildScrollingInventoryGrid
+            };
+
+            yield return new Scenario
+            {
                 Name = "stretched-label",
                 Description = "A label inside a vertically stacked panel. Normalization stretches " +
                               "it to the full content width; the next measure pass must still " +
@@ -242,6 +293,161 @@ namespace LayoutHarness
 
             both.InvokeGotFocus();
             both.InvokeEventEnter(new MouseEvent(0, 0));
+
+            return root;
+        }
+
+        /// <summary>
+        /// Side by side proof of what ClipsChildren does. Both containers are 100 high and hold
+        /// five rows that need far more than that.
+        /// </summary>
+        private static RectangleControl BuildClipping()
+        {
+            RectangleControl root = CreateRoot();
+            root.InsideOrientation = Orientation.Left;
+
+            // Both clip. The left one has more rows than fit and is cut, the right one fits and
+            // looks untouched - clipping costs nothing when there is no overflow.
+            //
+            // The unclipped counterpart is deliberately not rendered here: without clipping the
+            // overflow check squashes the last rows to zero height, which CheckNoZeroSizedControls
+            // rightly reports as a broken layout. That comparison is made numerically in
+            // Program.CheckClipping instead.
+            root.Children.Add(BuildRowBox("overflowing", rows: 5));
+            root.Children.Add(BuildRowBox("fitting", rows: 1));
+
+            return root;
+        }
+
+        private static RectangleControl BuildRowBox(string name, int rows)
+        {
+            var box = new RectangleControl(
+                borderWidth: 2,
+                borderColor: new ElementColor(1.0, 1.0, 1.0, 0.4),
+                _Padding: 8,
+                _Name: name);
+
+            box.InsideOrientation = Orientation.Top;
+            box.Size = new PointD(150, 88);
+            box.IsAutoSize = false;
+            box.ClipsChildren = true;
+
+            for (int i = 0; i < rows; i++)
+            {
+                var row = new ButtonControl(_Name: name + i);
+                row.Text = "Row " + i;
+                box.Children.Add(row);
+            }
+
+            return box;
+        }
+
+        /// <summary>
+        /// A scrolling container, driven through the real API rather than by setting the offset
+        /// field: laid out once so the content size is known, then scrolled, then handed back
+        /// for the harness to lay out again - which is exactly the sequence in the game.
+        /// </summary>
+        private static RectangleControl BuildScrolling(bool vertical, bool horizontal)
+        {
+            RectangleControl root = CreateRoot();
+
+            var list = new RectangleControl(
+                borderWidth: 2,
+                borderColor: new ElementColor(1.0, 1.0, 1.0, 0.25),
+                _Padding: 6,
+                _Name: "list");
+
+            list.InsideOrientation = Orientation.Top;
+            list.Size = new PointD(220, 140);
+            list.IsAutoSize = false;
+            list.EnableVerticalScrollbar = vertical;
+            list.EnableHorizontalScrollbar = horizontal;
+
+            for (int i = 0; i < 8; i++)
+            {
+                var row = new ButtonControl(_Name: "row" + i);
+
+                // Wide captions on a couple of rows, so the horizontal case has something to
+                // actually overflow with.
+                row.Text = horizontal && i % 3 == 0
+                    ? "Row " + i + " with a much longer caption"
+                    : "Row " + i;
+
+                list.Children.Add(row);
+            }
+
+            root.Children.Add(list);
+
+            // ScrollTo clamps against the content, which is only known after a layout pass.
+            root.PerformLayout();
+            list.ScrollTo(
+                horizontal ? list.MaxScrollOffset.X / 2 : 0,
+                vertical ? list.MaxScrollOffset.Y / 3 : 0);
+
+            return root;
+        }
+
+        /// <summary>
+        /// The shipped showcase, built by the mod's own code rather than by a copy of it here -
+        /// so the picture cannot show a screen that no longer exists.
+        /// </summary>
+        private static RectangleControl BuildShowcase()
+        {
+            var root = new RectangleControl(
+                backgroundColor: new ElementColor(0.20, 0.16, 0.13, 1.0),
+                _Name: "root");
+
+            ModernVintageGUI.Samples.ControlShowcase.Build(root, capi: null, withTitleBar: true);
+
+            return root;
+        }
+
+        private static RectangleControl BuildInventoryGrid()
+        {
+            RectangleControl root = CreateRoot();
+
+            var grid = new InventoryGridControl(columns: 6, _Name: "grid");
+            grid.SetSlotCount(18);
+
+            // One slot under the cursor, through the real Enter handler - so this shows the
+            // highlight the game would draw and not a colour set by hand here.
+            grid.Slots[7].InvokeEventEnter(new MouseEvent(0, 0));
+
+            root.Children.Add(grid);
+            return root;
+        }
+
+        private static RectangleControl BuildScrollingInventoryGrid()
+        {
+            RectangleControl root = CreateRoot();
+
+            var grid = new InventoryGridControl(columns: 6, _Name: "grid");
+            grid.SetSlotCount(48);
+
+            // Three rows of lattice: 3 slots plus the two gaps between them.
+            double visibleHeight = 3 * ItemSlotControl.UnscaledSlotSize
+                                 + 2 * ItemSlotControl.UnscaledSlotPadding;
+            double visibleWidth = 6 * ItemSlotControl.UnscaledSlotSize
+                                + 5 * ItemSlotControl.UnscaledSlotPadding;
+
+            double inset = InventoryGridControl.UnscaledInset * 2;
+            grid.Size = new PointD(
+                visibleWidth + inset + ScrollbarStyle.UnscaledWidth,
+                visibleHeight + inset);
+            grid.IsAutoSize = false;
+            grid.EnableVerticalScrollbar = true;
+
+            root.Children.Add(grid);
+
+            // ScrollTo needs the content size, which only exists after a layout pass.
+            root.PerformLayout();
+            grid.ScrollTo(0, (ItemSlotControl.UnscaledSlotSize + ItemSlotControl.UnscaledSlotPadding));
+
+            // The slot in the top left corner of the viewport once the grid has been scrolled by
+            // a row - the worst case for the selection ring, which reaches outside its slot on
+            // exactly the two sides the clip cuts hardest. If the grid ever stops leaving room
+            // for it, this picture shows a highlight with a flat top and a flat left side.
+            grid.Slots[6].InvokeEventEnter(new MouseEvent(0, 0));
 
             return root;
         }

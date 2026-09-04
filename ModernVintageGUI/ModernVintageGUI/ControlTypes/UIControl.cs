@@ -58,7 +58,18 @@ namespace IS2Mod.ControlTypes
         }
         public void InvokeEventMouseWheel(Vintagestory.API.Client.MouseWheelEventArgs vsArgs)
         {
-            var args = new Events.MouseWheelEventArgs(vsArgs);
+            InvokeEventMouseWheel(new Events.MouseWheelEventArgs(vsArgs));
+        }
+
+        /// <summary>
+        /// Like the key invokers, this takes the finished arguments: a wheel tick is offered to
+        /// the control under the cursor first and then to its ancestors, and each of them has to
+        /// see whether somebody below already used it. Building fresh arguments per control
+        /// would throw that answer away, which is why the cursor could sit on a button inside a
+        /// list and the list would never scroll.
+        /// </summary>
+        public void InvokeEventMouseWheel(Events.MouseWheelEventArgs args)
+        {
             MouseWheel?.Invoke(this, args);
         }
 
@@ -321,6 +332,80 @@ namespace IS2Mod.ControlTypes
             internal set => SetProperty(ref _hasKeyboardFocus, value);
         }
 
+        private PointD _maxSize;
+        /// <summary>
+        /// An upper limit for the measured size, in unscaled author units. Zero on an axis means
+        /// no limit on that axis, which is the default.
+        ///
+        /// It caps <see cref="IsAutoSize"/>: the control grows with its content and then stops.
+        /// Three things are worth knowing before using it.
+        ///
+        /// **It needs <see cref="ClipsChildren"/>, or scrolling, to be useful.** Capping the box
+        /// does not cap the content - the children still measure to their full size, overflow,
+        /// and are then squashed to nothing by the overflow check. A capped container without
+        /// clipping is worse than an uncapped one.
+        ///
+        /// **It scales.** Like every authored dimension it is multiplied by LayoutScale, so a
+        /// cap of 700 is 1400 device pixels at a GUI scale of 2. That makes it the right tool
+        /// for "this list should never be taller than about ten rows" and the wrong one for
+        /// "this must fit on the screen" - see
+        /// <see cref="Custom.CustomDialogElement.MaxScreenFraction"/> for the second.
+        ///
+        /// **Across the stacking axis the parent has the last word.** A parent stretches its
+        /// children to its own content width; the cap is honoured there too, but a control that
+        /// is capped narrower than its siblings simply ends up narrower, it does not make the
+        /// parent narrower.
+        /// </summary>
+        public PointD MaxSize
+        {
+            get => _maxSize;
+            set => SetProperty(ref _maxSize, value);
+        }
+
+        /// <summary>The size cap in device pixels. Zero on an axis still means no limit.</summary>
+        protected PointD ScaledMaxSize => new PointD(
+            _maxSize.X * LayoutScale,
+            _maxSize.Y * LayoutScale);
+
+        /// <summary>
+        /// Applies <see cref="MaxSize"/> to a measured size. A control that overrides
+        /// <see cref="CalculateSize"/> has to run its result through this, otherwise the cap is
+        /// silently ignored for that control.
+        /// </summary>
+        protected PointD ClampToMaxSize(PointD measured)
+        {
+            PointD cap = ScaledMaxSize;
+
+            return new PointD(
+                cap.X > 0 ? Math.Min(measured.X, cap.X) : measured.X,
+                cap.Y > 0 ? Math.Min(measured.Y, cap.Y) : measured.Y);
+        }
+
+        private bool _clipsChildren;
+        /// <summary>
+        /// Cut everything this control's descendants draw at its content box, and stop the
+        /// layout from shrinking them to fit.
+        ///
+        /// Off by default, because it is not free and most controls do not need it: the layout
+        /// already keeps a child's *box* inside its parent. What escapes is the drawing - a
+        /// TextLabelControl calls ShowText and paints the whole string regardless of its box,
+        /// and a blur writes wherever its radius reaches. Those are the cases this is for, plus
+        /// scrolling, where the content is deliberately larger than the container.
+        ///
+        /// Turning it on changes two things at once, and they belong together:
+        ///
+        /// 1. Drawing is clipped to <see cref="ContentBox"/> - the control's box inset by its
+        ///    padding, which is the same area the children were laid out into.
+        /// 2. Children are no longer shrunk by the overflow check in the layout. They keep their
+        ///    natural size and are cut visually instead. Without this a scrolled child would be
+        ///    squashed to the visible height rather than sliding out of view.
+        /// </summary>
+        public bool ClipsChildren
+        {
+            get => _clipsChildren;
+            set => SetProperty(ref _clipsChildren, value);
+        }
+
         /// <summary>
         /// Whether this control wants every key while it is focused, instead of only the ones
         /// the dialog acts on itself.
@@ -332,6 +417,16 @@ namespace IS2Mod.ControlTypes
         /// characters never reach the event API.
         /// </summary>
         public virtual bool WantsAllKeyboardInput => false;
+
+        /// <summary>
+        /// What this control's children add up to, in device pixels, as of the last measure
+        /// pass - their sizes plus their margins, merged along <see cref="InsideOrientation"/>.
+        /// Padding is not included; that is the difference between this and the control's own
+        /// measured size when it auto sizes.
+        ///
+        /// This is the "how much content is there" number a scrolling container needs.
+        /// </summary>
+        public PointD MeasuredContentSize { get; protected set; }
 
         // Store the actual size before any clipping
         private PointD _calculatedSize;
@@ -381,10 +476,231 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public virtual void GenerateRenderData(ImageSurface surface, Context context)
         {
+            if (Children.Count == 0)
+                return;
+
+            if (!ClipsChildren)
+            {
+                foreach (var child in Children)
+                {
+                    child.GenerateRenderData(surface, context);
+                }
+
+                return;
+            }
+
+            // Non-null here by construction: EffectiveClip always includes our own content box
+            // when we clip, and narrows it further by any clipping ancestor.
+            LayoutRect clip = EffectiveClip()!.Value;
+
+            // Fully clipped away - nothing below can be visible, so skip the subtree entirely.
+            if (clip.IsEmpty)
+                return;
+
+            // Save/Restore is what scopes the clip: Cairo can only ever narrow a clip region,
+            // never widen it, so it has to be undone rather than replaced. That also makes
+            // nesting work - a clipping container inside another one ends up with the overlap.
+            context.Save();
+            context.Rectangle(clip.X, clip.Y, clip.Width, clip.Height);
+            context.Clip();
+
             foreach (var child in Children)
             {
                 child.GenerateRenderData(surface, context);
             }
+
+            context.Restore();
+        }
+
+        /// <summary>
+        /// The area this control's children were laid out into: its own box inset by its padding.
+        /// This is what <see cref="ClipsChildren"/> cuts at, and what the arrange pass stretches
+        /// children across.
+        ///
+        /// Virtual because a scrolling container has to reserve a strip along its edge for the
+        /// scrollbars - see <see cref="RectangleControl"/>. Everything that asks "where do my
+        /// children go" goes through here, so narrowing it in one place narrows the clip, the
+        /// stretching and the hit test together.
+        /// </summary>
+        public virtual LayoutRect ContentBox()
+        {
+            return PaddingBox();
+        }
+
+        /// <summary>
+        /// The dialog this control is in was just shown. Override to do whatever has to happen
+        /// once per opening rather than once per construction.
+        ///
+        /// An inventory grid needs it: the server only accepts slot moves for an inventory the
+        /// player has opened, and that has to be announced on every open and taken back on every
+        /// close. Always call the base so the rest of the subtree gets told too.
+        /// </summary>
+        public virtual void OnDialogShown()
+        {
+            foreach (UIControl child in Children)
+            {
+                child.OnDialogShown();
+            }
+        }
+
+        /// <summary>The counterpart. Same rule about calling the base.</summary>
+        public virtual void OnDialogHidden()
+        {
+            foreach (UIControl child in Children)
+            {
+                child.OnDialogHidden();
+            }
+        }
+
+        /// <summary>
+        /// The second drawing pass, run every frame after the Cairo surface has been put on
+        /// screen. Draw here only what cannot be drawn with Cairo.
+        ///
+        /// It exists for one reason: an item stack is not a picture. The game draws it with
+        /// <c>IRenderAPI.RenderItemstackToGui</c>, out of the block and item atlases, with its
+        /// own shader and its own animation - none of which can land in a Cairo surface. Vanilla
+        /// draws exactly the same line, between ComposeElements and RenderInteractiveElements.
+        ///
+        /// The cost is that anything drawn here is redrawn every frame and is not part of the
+        /// cached surface, so keep it to what genuinely needs it. Coordinates here are *screen*
+        /// coordinates - see <see cref="GetScreenPosition"/> - because the render API draws to
+        /// the screen and not to our surface.
+        /// </summary>
+        public virtual void GenerateInteractiveRenderData(ICoreClientAPI api, float deltaTime)
+        {
+            if (Children.Count == 0)
+                return;
+
+            // A Cairo clip cannot help here - this pass does not go through Cairo at all. The
+            // GPU equivalent is the scissor rectangle, which is what vanilla uses for the same
+            // job in its scrolling inventories.
+            LayoutRect? clip = ClipsChildren ? EffectiveClip() : null;
+            bool scissored = false;
+
+            if (clip.HasValue)
+            {
+                if (clip.Value.IsEmpty)
+                    return;
+
+                ApplyScissor(api, clip.Value);
+                scissored = true;
+            }
+
+            foreach (UIControl child in Children)
+            {
+                child.GenerateInteractiveRenderData(api, deltaTime);
+            }
+
+            if (scissored)
+            {
+                RestoreAncestorScissor(api);
+            }
+        }
+
+        /// <summary>Turns a dialog local rectangle into the scissor box and switches it on.</summary>
+        private void ApplyScissor(ICoreClientAPI api, LayoutRect clip)
+        {
+            PointD dialogPosition = Dialog?.Position ?? new PointD(0, 0);
+
+            // GlScissor counts from the bottom left of the window, the layout from the top
+            // left of the dialog.
+            int left = (int)(dialogPosition.X + clip.X);
+            int top = (int)(dialogPosition.Y + clip.Y);
+            int width = (int)clip.Width;
+            int height = (int)clip.Height;
+
+            api.Render.GlScissor(left, api.Render.FrameHeight - (top + height), width, height);
+            api.Render.GlScissorFlag(true);
+        }
+
+        /// <summary>
+        /// Puts the scissor box back the way the caller left it.
+        ///
+        /// The scissor is one piece of global GL state, not a stack like the Cairo clip, so a
+        /// clipping container nested in another one cannot simply switch it off when it is done:
+        /// that would leave the rest of its parent's children drawing unclipped, spilling stacks
+        /// out past the edge of a viewport that is still meant to cut them off. The state to
+        /// return to is the clip of the nearest clipping ancestor, which
+        /// <see cref="EffectiveClip"/> already knows how to work out.
+        /// </summary>
+        private void RestoreAncestorScissor(ICoreClientAPI api)
+        {
+            for (UIControl? ancestor = Parent; ancestor != null; ancestor = ancestor.Parent)
+            {
+                if (!ancestor.ClipsChildren)
+                    continue;
+
+                LayoutRect? outer = ancestor.EffectiveClip();
+
+                if (outer.HasValue && !outer.Value.IsEmpty)
+                {
+                    ancestor.ApplyScissor(api, outer.Value);
+                    return;
+                }
+
+                break;
+            }
+
+            api.Render.GlScissorFlag(false);
+        }
+
+        /// <summary>
+        /// The area the arrange pass stretches children across.
+        ///
+        /// The same as <see cref="ContentBox"/> for everything that does not scroll, and the two
+        /// are worth keeping apart precisely where they differ: ContentBox is what the player can
+        /// see and what gets clipped, ArrangeBox is how much room the children get. A scrolling
+        /// container makes the second one bigger than the first on the axis it scrolls.
+        /// </summary>
+        public virtual LayoutRect ArrangeBox()
+        {
+            return ContentBox();
+        }
+
+        /// <summary>
+        /// The control's own box inset by its padding, with nothing else taken off. This is what
+        /// <see cref="ContentBox"/> returns by default; an override that reserves space - a
+        /// scrolling container taking a strip for its bars - starts from here rather than
+        /// calling ContentBox again, which would recurse.
+        /// </summary>
+        protected LayoutRect PaddingBox()
+        {
+            double inset = ScaledPadding;
+
+            return new LayoutRect(
+                Position.X + inset,
+                Position.Y + inset,
+                Math.Max(0, Size.X - inset * 2),
+                Math.Max(0, Size.Y - inset * 2));
+        }
+
+        /// <summary>
+        /// The region this control is actually allowed to paint in, or null when nothing clips
+        /// it - the overlap of the content boxes of every clipping ancestor, plus its own when
+        /// it clips.
+        ///
+        /// Derived from the tree rather than passed down, so <see cref="GenerateRenderData"/>
+        /// keeps its signature and a custom control written against the old one still compiles.
+        /// It matters for anything that writes pixels behind Cairo's back: a Cairo clip is a
+        /// property of the context, so <c>SurfaceTransformBlur</c>, which pokes at the surface
+        /// buffer directly, does not see it and would smear past the edge of a viewport. Such a
+        /// control has to intersect its own rectangle with this one - see
+        /// <see cref="RectangleControl"/>.
+        /// </summary>
+        public LayoutRect? EffectiveClip()
+        {
+            LayoutRect? clip = ClipsChildren ? ContentBox() : (LayoutRect?)null;
+
+            for (UIControl? ancestor = Parent; ancestor != null; ancestor = ancestor.Parent)
+            {
+                if (!ancestor.ClipsChildren)
+                    continue;
+
+                LayoutRect box = ancestor.ContentBox();
+                clip = clip.HasValue ? clip.Value.Intersect(box) : box;
+            }
+
+            return clip;
         }
         #endregion
 
@@ -511,9 +827,16 @@ namespace IS2Mod.ControlTypes
             // current Size here instead of ExplicitSize is what used to make repeated layout
             // passes grow the control: Size is also the output of the arrange pass, so every
             // run folded the previous result plus the children plus the padding back in.
-            PointD measured = IsAutoSize
+            PointD measured = ClampToMaxSize(IsAutoSize
                 ? new PointD(content.X + ScaledPadding * 2, content.Y + ScaledPadding * 2)
-                : ScaledExplicitSize;
+                : ScaledExplicitSize);
+
+            // Remember what the children add up to, before padding and before the control's own
+            // size has any say. A scrolling container compares this against its viewport to
+            // decide whether a bar is needed - and it has to be knowable here, in the measure
+            // pass, rather than from the positions afterwards: a decision that only settled on
+            // the second pass would make the layout non idempotent.
+            MeasuredContentSize = content;
 
             _calculatedSize = measured;
 
@@ -537,9 +860,13 @@ namespace IS2Mod.ControlTypes
             if (Children.Count == 0)
                 return;
 
-            // Calculate available content area (parent size minus padding)
-            double availableWidth = Size.X - (ScaledPadding * 2);
-            double availableHeight = Size.Y - (ScaledPadding * 2);
+            // The area the children are stretched across. Not ContentBox: that is the *visible*
+            // area, and on an axis this control scrolls the children have to be laid out across
+            // the whole content instead - otherwise a row could never be wider than the window
+            // it is being scrolled through, which would make scrolling on that axis pointless.
+            LayoutRect arrange = ArrangeBox();
+            double availableWidth = arrange.Width;
+            double availableHeight = arrange.Height;
 
             switch (InsideOrientation)
             {
@@ -579,6 +906,10 @@ namespace IS2Mod.ControlTypes
                 // Ensure we don't set negative or zero width
                 childAvailableWidth = Math.Max(1, childAvailableWidth);
 
+                // Stretching would otherwise walk straight over a size cap, and the cap would
+                // look like it works on the stacking axis and silently not across it.
+                childAvailableWidth = child.ClampToMaxSize(new PointD(childAvailableWidth, 0)).X;
+
                 // Stretching is part of arranging, so it goes through SetLayoutSize and
                 // leaves the measured size (_calculatedSize) untouched - overwriting that
                 // would destroy the natural size the next measure pass builds on.
@@ -603,6 +934,9 @@ namespace IS2Mod.ControlTypes
 
                 // Ensure we don't set negative or zero height
                 childAvailableHeight = Math.Max(1, childAvailableHeight);
+
+                // Same as above, on the other axis.
+                childAvailableHeight = child.ClampToMaxSize(new PointD(0, childAvailableHeight)).Y;
 
                 // Same as above: arrange writes the layout size, not the measured size.
                 child.SetLayoutSize(new PointD(child.Size.X, childAvailableHeight));
@@ -756,6 +1090,15 @@ namespace IS2Mod.ControlTypes
                 return _calculatedSize;
             }
 
+            // A clipping parent cuts the drawing instead, so the box is left at its natural
+            // size. This is what makes content larger than its container possible at all: the
+            // shrink below would otherwise squash a scrolled child to the visible area rather
+            // than letting it slide out of view.
+            if (Parent.ClipsChildren)
+            {
+                return Size;
+            }
+
             // Parent boundaries (accounting for padding)
             double parentMinX = Parent.Position.X + Parent.ScaledPadding;
             double parentMinY = Parent.Position.Y + Parent.ScaledPadding;
@@ -846,6 +1189,14 @@ namespace IS2Mod.ControlTypes
             if (!control.ContainsLocalPoint(localX, localY))
             {
                 return null;
+            }
+
+            // What was clipped away is not there as far as the player is concerned, so it must
+            // not be clickable either. Without this a row scrolled out of a viewport would still
+            // take the click that lands where it used to be.
+            if (control.ClipsChildren && !control.ContentBox().Contains(localX, localY))
+            {
+                return control;
             }
 
             for (int i = control.Children.Count - 1; i >= 0; i--)

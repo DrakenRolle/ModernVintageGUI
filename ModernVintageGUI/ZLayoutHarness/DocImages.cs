@@ -139,6 +139,7 @@ namespace LayoutHarness
             yield return ("readme-title-bar", BuildTitleBar());
             yield return ("readme-context-menu", BuildContextMenu(hovered: false));
             yield return ("readme-context-menu-hover", BuildContextMenu(hovered: true));
+            yield return ("readme-showcase", BuildShowcase());
             yield return ("readme-keyboard-focus", BuildKeyboardFocus());
             yield return ("readme-runtime-before", BuildRuntimeEdit(added: false));
             yield return ("readme-runtime-after", BuildRuntimeEdit(added: true));
@@ -201,6 +202,17 @@ namespace LayoutHarness
         /// Hover and keyboard focus side by side. Same approach as the hover picture: the real
         /// handlers are driven, so this is what the control does rather than what it is meant to.
         /// </summary>
+        /// <summary>
+        /// The showcase dialog, built by the mod's own code - the same tree the test hotkey
+        /// opens in game, so this picture cannot go stale while the dialog changes.
+        /// </summary>
+        private static UIControl BuildShowcase()
+        {
+            var root = new RectangleControl(_Name: "dialog");
+            ModernVintageGUI.Samples.ControlShowcase.Build(root, capi: null, withTitleBar: true);
+            return root;
+        }
+
         private static UIControl BuildKeyboardFocus()
         {
             RectangleControl root = CreateDialogRoot();

@@ -53,8 +53,16 @@ namespace IS2Mod.ControlTypes.Renderer
         /// </summary>
         private const float FocusedZ = 10000f;
 
-        /// <summary>Popups sit above the dialog they belong to, focused or not.</summary>
-        private const float OverlayZ = 10100f;
+        /// <summary>
+        /// Popups sit above the dialog they belong to, focused or not.
+        ///
+        /// The gap to <see cref="FocusedZ"/> has to clear everything that dialog draws in front
+        /// of its own surface, and the tallest of those is the stack size of an item in a slot -
+        /// InventoryItemRenderer puts that a hundred in front of the stack, so a menu only a
+        /// hundred above the dialog would have the numbers of the grid behind it printed through
+        /// it. A thousand leaves the question closed.
+        /// </summary>
+        private const float OverlayZ = 11000f;
 
         private float RenderZ()
         {
@@ -132,16 +140,39 @@ namespace IS2Mod.ControlTypes.Renderer
             if (wantsAbove != _aboveVanilla)
                 return;
 
-            LoadedTexture? texture = _dialog.StaticElementsTexture;
-
-            // Only render if dialog is visible and has a valid texture
-            if (!_dialog.IsVisible || texture == null || texture.TextureId == 0)
+            if (!_dialog.IsVisible)
                 return;
 
-            RenderDialogTexture(texture);
+            // Rebuild the surface if anything changed since the last frame, and build it for the
+            // first time for a dialog that was just shown. Exactly one of the two renderers gets
+            // past the check above per frame, so this runs once.
+            //
+            // Drawing and uploading from inside the render stage is what the game does itself -
+            // GuiComposer.Render() checks recomposeOnRender and recomposes right there.
+            _dialog.EnsureRendered();
+
+            LoadedTexture? texture = _dialog.StaticElementsTexture;
+
+            if (texture == null || texture.TextureId == 0)
+                return;
+
+            float z = RenderZ();
+
+            RenderDialogTexture(texture, z);
+
+            // Tell the tree how deep the surface it has to draw in front of was put. Vanilla's
+            // own numbers (90 for a stack in a slot, 450 for the one on the cursor) are relative
+            // to its dialogs, which stack in steps of 150 from zero - ours sits at 10000 to clear
+            // the whole vanilla GUI, so those numbers would land far behind our own background
+            // and the item would simply not be visible.
+            _dialog.SurfaceRenderZ = z;
+
+            // Anything that cannot live in the Cairo surface - item stacks, above all - goes on
+            // top of it, every frame. Same split the vanilla GUI makes.
+            _dialog.GenerateInteractiveRenderData(_api, deltaTime);
         }
 
-        private void RenderDialogTexture(LoadedTexture texture)
+        private void RenderDialogTexture(LoadedTexture texture, float z)
         {
             _api.Render.RenderTexture(
                 texture.TextureId,
@@ -149,7 +180,7 @@ namespace IS2Mod.ControlTypes.Renderer
                 _dialog.Position.Y,
                 _dialog.Size.X,
                 _dialog.Size.Y,
-                RenderZ()
+                z
             );
         }
         #endregion

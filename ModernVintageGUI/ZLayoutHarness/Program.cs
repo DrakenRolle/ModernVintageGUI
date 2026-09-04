@@ -78,6 +78,10 @@ namespace LayoutHarness
 
             CheckContextMenuAnchorIsFree(failures);
             CheckFocusOrder(failures);
+            CheckRuntimeEditRedraws(failures);
+            CheckClipping(failures);
+            CheckScrolling(failures);
+            CheckMaxSize(failures);
 
             Console.WriteLine();
 
@@ -406,6 +410,539 @@ namespace LayoutHarness
             Console.WriteLine($"  {order.Count} focusable controls, cycle closes in both directions");
         }
 
+        /// <summary>
+        /// Editing a tree that is already on screen has to give the same picture as having built
+        /// it that way in the first place.
+        ///
+        /// This is the drawing half of what `CheckSurvivesScaleChange` does for the layout, and
+        /// it is the half that matters for the deferred redraw: `Refresh()` no longer draws, it
+        /// marks the dialog dirty and the renderer rebuilds the surface once at the start of the
+        /// next frame. Comparing pixels rather than the layout snapshot catches a control that
+        /// lays out correctly but keeps drawing from something it cached earlier.
+        ///
+        /// What this cannot cover is the renderer itself - the dirty flag being flushed per
+        /// frame and the GL upload need the game.
+        /// </summary>
+        private static void CheckRuntimeEditRedraws(List<string> failures)
+        {
+            Console.WriteLine("### runtime edit");
+            Console.WriteLine("Editing a live tree must draw the same as building it that way.");
+            Console.WriteLine();
+
+            RectangleControl BuildRow(int buttonCount)
+            {
+                var root = new RectangleControl(
+                    backgroundColor: new ElementColor(0.20, 0.16, 0.13, 1.0),
+                    _Name: "root");
+                root.InsideOrientation = Orientation.Top;
+                root.Padding = 10;
+
+                for (int i = 0; i < buttonCount; i++)
+                {
+                    var button = new ButtonControl(_Name: "b" + i);
+                    button.Text = "Button " + i;
+                    root.Children.Add(button);
+                }
+
+                return root;
+            }
+
+            // The tree that is already open: built with two, then edited to three.
+            RectangleControl edited = BuildRow(2);
+            edited.PerformLayout();
+            byte[] beforeEdit = RenderToBytes(edited);
+
+            var added = new ButtonControl(_Name: "b2");
+            added.Text = "Button 2";
+            edited.Children.Add(added);
+            edited.PerformLayout();
+            byte[] afterEdit = RenderToBytes(edited);
+
+            // Built with three from the start.
+            RectangleControl fresh = BuildRow(3);
+            fresh.PerformLayout();
+            byte[] freshBytes = RenderToBytes(fresh);
+
+            if (beforeEdit.Length == afterEdit.Length && beforeEdit.AsSpan().SequenceEqual(afterEdit))
+            {
+                failures.Add("[runtime edit] adding a child did not change the drawing at all");
+                Console.WriteLine("  ADDING A CHILD CHANGED NOTHING");
+                return;
+            }
+
+            if (afterEdit.Length != freshBytes.Length)
+            {
+                failures.Add(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "[runtime edit] the edited tree renders {0:0.##}x{1:0.##}, a freshly built one {2:0.##}x{3:0.##}",
+                    edited.Size.X, edited.Size.Y, fresh.Size.X, fresh.Size.Y));
+
+                Console.WriteLine("  EDITED AND FRESH TREE HAVE DIFFERENT SIZES");
+                return;
+            }
+
+            int differing = 0;
+            for (int i = 0; i < afterEdit.Length; i++)
+            {
+                if (afterEdit[i] != freshBytes[i])
+                    differing++;
+            }
+
+            if (differing > 0)
+            {
+                failures.Add(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "[runtime edit] the edited tree draws differently from a freshly built one: " +
+                    "{0} of {1} bytes differ", differing, afterEdit.Length));
+
+                Console.WriteLine($"  EDITED AND FRESH TREE DRAW DIFFERENTLY ({differing} bytes)");
+                return;
+            }
+
+            Console.WriteLine(
+                $"  2 -> 3 buttons: {edited.Size.X:0.##}x{edited.Size.Y:0.##}, " +
+                "pixel identical to a freshly built tree");
+        }
+
+        /// <summary>
+        /// ClipsChildren has to do three things, and this checks all three against the same tree
+        /// with the flag off:
+        ///
+        /// 1. Nothing is painted outside the container's content box.
+        /// 2. The child keeps its natural size instead of being shrunk by the overflow check -
+        ///    that is what makes content larger than its container possible at all.
+        /// 3. A point outside the content box does not hit the child any more, so what was cut
+        ///    away is not clickable either.
+        /// </summary>
+        private static void CheckClipping(List<string> failures)
+        {
+            Console.WriteLine("### clipping");
+            Console.WriteLine("ClipsChildren must cut the drawing, keep child sizes, and cut hit testing.");
+            Console.WriteLine();
+
+            // Overflow happens on the stacking axis. Across it the children are normalized to the
+            // container width anyway, which is what a list wants, so there is nothing to cut.
+            const int RowCount = 6;
+
+            RectangleControl Build(bool clips, int rowCount, out RectangleControl box)
+            {
+                var root = new RectangleControl(_Name: "root");
+                root.InsideOrientation = Orientation.None;
+                root.Padding = 0;
+                root.Size = new PointD(260, 260);
+                root.IsAutoSize = false;
+
+                box = new RectangleControl(_Padding: 8, _Name: "box");
+                box.InsideOrientation = Orientation.Top;
+                box.Size = new PointD(220, 100);
+                box.IsAutoSize = false;
+                box.ClipsChildren = clips;
+
+                for (int i = 0; i < rowCount; i++)
+                {
+                    var row = new ButtonControl(_Name: "row" + i);
+                    row.Text = "Row " + i;
+                    box.Children.Add(row);
+                }
+
+                root.Children.Add(box);
+                return root;
+            }
+
+            RectangleControl openRoot = Build(false, RowCount, out RectangleControl openBox);
+            RectangleControl clipRoot = Build(true, RowCount, out RectangleControl clipBox);
+            RectangleControl emptyRoot = Build(true, 0, out RectangleControl emptyBox);
+
+            openRoot.PerformLayout();
+            clipRoot.PerformLayout();
+            emptyRoot.PerformLayout();
+
+            double cut = clipBox.ContentBox().Bottom;
+
+            // 1. Nothing of the children is painted below the content box. Compared against the
+            //    same container with no children at all rather than against zero, because the
+            //    container draws its own box down there and clipping does not touch that.
+            int inkOpen = CountInkBelow(openRoot, cut);
+            int inkClipped = CountInkBelow(clipRoot, cut);
+            int inkEmpty = CountInkBelow(emptyRoot, emptyBox.ContentBox().Bottom);
+
+            if (inkOpen <= inkEmpty)
+            {
+                failures.Add("[clipping] the unclipped tree did not overflow, so the check proves nothing");
+                Console.WriteLine("  THE TEST TREE DOES NOT OVERFLOW");
+                return;
+            }
+
+            if (inkClipped != inkEmpty)
+            {
+                failures.Add(
+                    $"[clipping] children painted below the content box despite ClipsChildren: " +
+                    $"{inkClipped} pixels where an empty container has {inkEmpty} (unclipped: {inkOpen})");
+                Console.WriteLine($"  CLIP LEAKED: {inkClipped - inkEmpty} pixels of children below the cut");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  ink below the cut: {inkOpen} unclipped, {inkClipped} clipped, {inkEmpty} with no children");
+            }
+
+            // 2. The rows keep their natural height instead of being squashed to fit. This is
+            //    what makes content taller than its container possible, and therefore scrolling.
+            var openLast = (ButtonControl)openBox.Children[RowCount - 1];
+            var clipLast = (ButtonControl)clipBox.Children[RowCount - 1];
+
+            if (clipLast.Size.Y <= openLast.Size.Y)
+            {
+                failures.Add(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "[clipping] the last row was still shrunk: {0:0.##} high inside a clipping " +
+                    "container, {1:0.##} without one - it should keep its full height",
+                    clipLast.Size.Y, openLast.Size.Y));
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  last row height: {openLast.Size.Y:0.##} squashed to fit, {clipLast.Size.Y:0.##} kept natural");
+            }
+
+            // 3. What was cut away is not clickable either.
+            double probeX = clipBox.Position.X + clipBox.Size.X / 2;
+            double probeY = cut + 4;
+
+            UIControl? hitClipped = HitAt(clipRoot, probeX, probeY);
+
+            if (hitClipped is ButtonControl)
+            {
+                failures.Add(
+                    $"[clipping] a point below the content box still hit '{hitClipped.Name}'");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  hit below the cut: '{hitClipped?.Name ?? "nothing"}' - no row");
+            }
+        }
+
+        /// <summary>
+        /// The scrolling contract: a bar appears only when it is needed, it costs the viewport
+        /// exactly its own width, the reachable range is content minus viewport, scrolling moves
+        /// the content by exactly what was asked, and the position survives a GUI scale change.
+        ///
+        /// That last one is the reason the offset is stored in author units. The content grows
+        /// with the scale, so an offset kept in device pixels would point at a different row
+        /// after the player moves the slider and the list would jump.
+        /// </summary>
+        private static void CheckScrolling(List<string> failures)
+        {
+            Console.WriteLine("### scrolling");
+            Console.WriteLine("Bars appear on demand, cost their own width, and survive a scale change.");
+            Console.WriteLine();
+
+            RectangleControl BuildList(int rowCount, out RectangleControl list)
+            {
+                var root = new RectangleControl(_Name: "root");
+                root.InsideOrientation = Orientation.Top;
+                root.Padding = 0;
+
+                list = new RectangleControl(_Padding: 6, _Name: "list");
+                list.InsideOrientation = Orientation.Top;
+                list.Size = new PointD(220, 140);
+                list.IsAutoSize = false;
+                list.EnableVerticalScrollbar = true;
+
+                for (int i = 0; i < rowCount; i++)
+                {
+                    var row = new ButtonControl(_Name: "row" + i);
+                    row.Text = "Row " + i;
+                    list.Children.Add(row);
+                }
+
+                root.Children.Add(list);
+                return root;
+            }
+
+            // 1. No overflow, no bar - and the viewport is then the full padding box.
+            RectangleControl fitsRoot = BuildList(2, out RectangleControl fits);
+            fitsRoot.PerformLayout();
+
+            if (fits.MaxScrollOffset.Y > 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] content that fits still reports {0:0.##} of scroll range",
+                    fits.MaxScrollOffset.Y));
+            }
+
+            RectangleControl overflowRoot = BuildList(8, out RectangleControl list8);
+            overflowRoot.PerformLayout();
+
+            double barThickness = ScrollbarStyle.UnscaledWidth * list8.LayoutScale;
+            double expectedViewportWidth = fits.ViewportSize.X - barThickness;
+
+            if (Math.Abs(list8.ViewportSize.X - expectedViewportWidth) > 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] the bar should cost the viewport {0:0.##} of width: {1:0.##} without " +
+                    "a bar, {2:0.##} with, expected {3:0.##}",
+                    barThickness, fits.ViewportSize.X, list8.ViewportSize.X, expectedViewportWidth));
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  viewport width {fits.ViewportSize.X:0.##} without a bar, " +
+                    $"{list8.ViewportSize.X:0.##} with (bar is {barThickness:0.##})");
+            }
+
+            // 2. Reachable range is content minus viewport.
+            double expectedMax = list8.ContentSize.Y - list8.ViewportSize.Y;
+            if (Math.Abs(list8.MaxScrollOffset.Y - expectedMax) > 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] scroll range is {0:0.##} but content {1:0.##} minus viewport {2:0.##} is {3:0.##}",
+                    list8.MaxScrollOffset.Y, list8.ContentSize.Y, list8.ViewportSize.Y, expectedMax));
+            }
+
+            // 3. Scrolling moves the content by exactly the offset.
+            UIControl firstRow = list8.Children[0];
+            double beforeY = firstRow.Position.Y;
+
+            const double Step = 40;
+            list8.ScrollTo(0, Step);
+            overflowRoot.PerformLayout();
+
+            double movedBy = beforeY - firstRow.Position.Y;
+            if (Math.Abs(movedBy - Step) > 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] scrolling by {0:0.##} moved the content by {1:0.##}", Step, movedBy));
+            }
+            else
+            {
+                Console.WriteLine($"  scrolling by {Step:0.##} moved the first row up by {movedBy:0.##}");
+            }
+
+            // 4. Both ends clamp.
+            list8.ScrollTo(0, -500);
+            overflowRoot.PerformLayout();
+            if (list8.ScrollOffset.Y != 0)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] scrolling past the top left the offset at {0:0.##}", list8.ScrollOffset.Y));
+            }
+
+            list8.ScrollTo(0, 99999);
+            overflowRoot.PerformLayout();
+            if (Math.Abs(list8.ScrollOffset.Y - list8.MaxScrollOffset.Y) > 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] scrolling past the bottom left the offset at {0:0.##}, range ends at {1:0.##}",
+                    list8.ScrollOffset.Y, list8.MaxScrollOffset.Y));
+            }
+            else
+            {
+                Console.WriteLine($"  clamped at both ends, range 0 to {list8.MaxScrollOffset.Y:0.##}");
+            }
+
+            // 5. The same place in the content after a scale change. Scroll to the middle at 1x,
+            //    then lay out at 2x: the offset has to double along with everything else.
+            RectangleControl scaleRoot = BuildList(8, out RectangleControl scaleList);
+            scaleRoot.PerformLayout();
+
+            double halfway = scaleList.MaxScrollOffset.Y / 2;
+            scaleList.ScrollTo(0, halfway);
+            scaleRoot.PerformLayout();
+
+            double fractionAt1x = scaleList.ScrollOffset.Y / scaleList.MaxScrollOffset.Y;
+
+            scaleRoot.LayoutScale = 2.0;
+            scaleRoot.PerformLayout();
+
+            double fractionAt2x = scaleList.ScrollOffset.Y / scaleList.MaxScrollOffset.Y;
+
+            if (Math.Abs(fractionAt1x - fractionAt2x) > 0.02)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[scrolling] the scroll position moved when the GUI scale changed: {0:0.###} of the " +
+                    "way down at 1x, {1:0.###} at 2x", fractionAt1x, fractionAt2x));
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  scale change keeps the position: {fractionAt1x:0.###} of the way down at 1x, " +
+                    $"{fractionAt2x:0.###} at 2x");
+            }
+        }
+
+        /// <summary>
+        /// MaxSize caps an auto sizing control - on the stacking axis, where the control decides
+        /// its own size, and across it, where the parent stretches it and could walk over the
+        /// cap without noticing. The second one is the interesting half: it is the failure that
+        /// would show up later as "MaxSize works sometimes".
+        ///
+        /// And it scales, like every other authored dimension.
+        /// </summary>
+        private static void CheckMaxSize(List<string> failures)
+        {
+            Console.WriteLine("### max size");
+            Console.WriteLine("A cap has to hold on both axes, and to scale with the GUI.");
+            Console.WriteLine();
+
+            const double CapHeight = 90;
+            const double CapWidth = 120;
+
+            RectangleControl Build(bool capped, out RectangleControl box, double scale)
+            {
+                var root = new RectangleControl(_Name: "root");
+                root.InsideOrientation = Orientation.Top;
+                root.Padding = 10;
+                root.LayoutScale = scale;
+
+                // Wide enough that the parent would stretch an uncapped child well past the cap.
+                root.Size = new PointD(400, 400);
+                root.IsAutoSize = false;
+
+                box = new RectangleControl(_Padding: 4, _Name: "box");
+                box.InsideOrientation = Orientation.Top;
+                box.ClipsChildren = true;
+
+                if (capped)
+                    box.MaxSize = new PointD(CapWidth, CapHeight);
+
+                for (int i = 0; i < 6; i++)
+                {
+                    var row = new ButtonControl(_Name: "row" + i);
+                    row.Text = "Row " + i;
+                    box.Children.Add(row);
+                }
+
+                root.Children.Add(box);
+                root.PerformLayout();
+                return root;
+            }
+
+            Build(false, out RectangleControl open, 1.0);
+            Build(true, out RectangleControl capped, 1.0);
+
+            // 1. The stacking axis: the content is far taller than the cap.
+            if (open.Size.Y <= CapHeight)
+            {
+                failures.Add("[max size] the uncapped control was already inside the cap, so the check proves nothing");
+                Console.WriteLine("  THE TEST TREE DOES NOT EXCEED THE CAP");
+                return;
+            }
+
+            if (capped.Size.Y > CapHeight + 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[max size] height cap of {0:0.##} not honoured: {1:0.##} high (uncapped {2:0.##})",
+                    CapHeight, capped.Size.Y, open.Size.Y));
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  height: {open.Size.Y:0.##} uncapped, {capped.Size.Y:0.##} capped at {CapHeight:0.##}");
+            }
+
+            // 2. Across the stacking axis, where the parent does the sizing. This is the half
+            //    the normalization pass used to overwrite.
+            if (capped.Size.X > CapWidth + 0.001)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[max size] width cap of {0:0.##} was overwritten by the parent stretching the " +
+                    "child: {1:0.##} wide (uncapped {2:0.##})",
+                    CapWidth, capped.Size.X, open.Size.X));
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"  width: {open.Size.X:0.##} stretched by the parent, {capped.Size.X:0.##} capped at {CapWidth:0.##}");
+            }
+
+            // 3. It is an authored dimension, so it doubles at 2x like everything else.
+            Build(true, out RectangleControl capped2x, 2.0);
+
+            if (Math.Abs(capped2x.Size.Y - CapHeight * 2) > 1.0)
+            {
+                failures.Add(string.Format(CultureInfo.InvariantCulture,
+                    "[max size] the cap did not scale: {0:0.##} high at 2x, expected about {1:0.##}",
+                    capped2x.Size.Y, CapHeight * 2));
+            }
+            else
+            {
+                Console.WriteLine($"  cap scales: {capped.Size.Y:0.##} at 1x, {capped2x.Size.Y:0.##} at 2x");
+            }
+        }
+
+        /// <summary>
+        /// Walks the tree the way the dialog's hit test does. HitTest itself is protected and
+        /// converts from screen coordinates, which a harness tree has no notion of.
+        /// </summary>
+        private static UIControl? HitAt(UIControl root, double x, double y)
+        {
+            if (!root.ContainsLocalPoint(x, y))
+                return null;
+
+            if (root.ClipsChildren && !root.ContentBox().Contains(x, y))
+                return root;
+
+            for (int i = root.Children.Count - 1; i >= 0; i--)
+            {
+                UIControl? hit = HitAt(root.Children[i], x, y);
+                if (hit != null)
+                    return hit;
+            }
+
+            return root;
+        }
+
+        /// <summary>Counts pixels with any opacity below a given y.</summary>
+        private static int CountInkBelow(UIControl root, double y)
+        {
+            int width = Math.Max(1, (int)Math.Ceiling(root.Size.X));
+            int height = Math.Max(1, (int)Math.Ceiling(root.Size.Y));
+
+            using (var surface = new ImageSurface(Format.Argb32, width, height))
+            using (var ctx = new Context(surface))
+            {
+                ctx.Antialias = Antialias.Best;
+                root.GenerateRenderData(surface, ctx);
+                surface.Flush();
+
+                byte[] data = surface.Data;
+                int stride = surface.Stride;
+                int firstRow = (int)Math.Ceiling(y) + 1;
+                int count = 0;
+
+                for (int row = firstRow; row < height; row++)
+                {
+                    for (int column = 0; column < width; column++)
+                    {
+                        // Argb32 is BGRA in memory on a little endian machine, so alpha is last.
+                        if (data[row * stride + column * 4 + 3] != 0)
+                            count++;
+                    }
+                }
+
+                return count;
+            }
+        }
+
+        /// <summary>Lays the tree out onto its own surface and returns the raw pixels.</summary>
+        private static byte[] RenderToBytes(UIControl root)
+        {
+            int width = Math.Max(1, (int)Math.Ceiling(root.Size.X));
+            int height = Math.Max(1, (int)Math.Ceiling(root.Size.Y));
+
+            using (var surface = new ImageSurface(Format.Argb32, width, height))
+            using (var ctx = new Context(surface))
+            {
+                ctx.Antialias = Antialias.Best;
+                root.GenerateRenderData(surface, ctx);
+                surface.Flush();
+
+                return (byte[])surface.Data.Clone();
+            }
+        }
+
         private static UIControl? FindByName(UIControl root, string name)
         {
             foreach (UIControl control in LayoutSnapshot.Walk(root))
@@ -456,6 +993,12 @@ namespace LayoutHarness
                 // The button decoration overlays legitimately measure to nothing before the
                 // button stretches them over itself.
                 if (control.Size.X > 0 && control.Size.Y > 0)
+                    continue;
+
+                // A context menu anchor is supposed to be zero sized: it hangs in the host tree
+                // only to be given a position, and its menu lives in a popup of its own. That it
+                // costs no space is checked properly by CheckContextMenuAnchorIsFree.
+                if (control is ContextMenuControl)
                     continue;
 
                 failures.Add(

@@ -220,7 +220,7 @@ namespace IS2Mod.ControlTypes
                 // pixels, like every other authored dimension. CalculatedSize has to be kept in
                 // sync: CalculateClippedSize uses it to decide whether the control overflows its
                 // parent, and a stale 0 there makes that check meaningless.
-                CalculatedSize = ScaledExplicitSize;
+                CalculatedSize = ClampToMaxSize(ScaledExplicitSize);
                 SetLayoutSize(CalculatedSize);
                 return CalculatedSize;
             }

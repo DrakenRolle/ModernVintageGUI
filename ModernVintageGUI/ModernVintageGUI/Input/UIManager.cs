@@ -39,6 +39,28 @@ namespace IS2Mod.Input
         /// </summary>
         public bool RequiresUngrabbedMouse { get; private set; }
 
+        /// <summary>
+        /// True while the cursor sits on an item slot of one of our dialogs.
+        ///
+        /// Read on every mouse movement by
+        /// <see cref="IS2Mod.Patches.GuiManagerHoverSlotPatch"/>, which is where the reason it
+        /// exists is written down: the game takes the hovered slot back on every move unless one
+        /// of its own windows claims it, and none of ours is one of its windows.
+        /// </summary>
+        public bool IsItemSlotHovered
+        {
+            get
+            {
+                foreach (CustomDialogElement dialog in _openDialogs)
+                {
+                    if (dialog.IsVisible && dialog.HoveredControl is ControlTypes.ItemSlotControl)
+                        return true;
+                }
+
+                return false;
+            }
+        }
+
         public UIManager(ICoreClientAPI api)
         {
             _api = api ?? throw new ArgumentNullException(nameof(api));
@@ -322,7 +344,29 @@ namespace IS2Mod.Input
             }
         }
 
+        /// <summary>
+        /// Routes movement to our dialogs - and then always hands the event on to the game.
+        ///
+        /// A dialog marks a move as handled to stop the ones underneath it from also hovering,
+        /// which is right among ourselves and wrong towards the game. The event API aborts as
+        /// soon as Handled is set, so a swallowed move never reaches ClientMain's client systems
+        /// - and HudMouseTools moves the stack the player is carrying from its OnMouseMove. The
+        /// result is the bug this clearing fixes: the moment the cursor enters one of our
+        /// dialogs the game stops being told where it is, and the item stays behind, drawn at
+        /// the edge of the dialog.
+        ///
+        /// Nothing is lost by letting the move through. A press is still swallowed, which is
+        /// what keeps the click off the world and out of the GUI underneath; movement on its own
+        /// changes nothing while the cursor is free.
+        /// </summary>
         private void OnMouseMove(MouseEvent e)
+        {
+            RouteMouseMove(e);
+
+            e.Handled = false;
+        }
+
+        private void RouteMouseMove(MouseEvent e)
         {
             CustomDialogElement? capturing = CapturingDialog();
             if (capturing != null)

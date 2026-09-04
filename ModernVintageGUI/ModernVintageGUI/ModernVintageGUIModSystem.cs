@@ -4,6 +4,7 @@ using IS2Mod.ControlTypes.Custom;
 using IS2Mod.Input;
 using ModernVintageGUI.ControlTypes;
 using ModernVintageGUI.Enums;
+using ModernVintageGUI.Inventory;
 using System.Collections.Generic;
 using System.Linq;
 using Vintagestory.API.Client;
@@ -18,10 +19,21 @@ namespace ModernVintageGUI
         public const string HarmonyId = "modernvintagegui";
         private const string TestDialogHotkey = "mvgui_testdialog";
 
+        /// <summary>
+        /// The showcase inventory. The class name is half of the inventory id - the other half
+        /// is the player UID - so it has to be the same string on both sides, and the slot count
+        /// with it: the two copies address each other by that id and the server rejects a slot
+        /// number the inventory does not have.
+        /// </summary>
+        private const string ShowcaseInventoryClass = "mvguishowcase";
+        private const int ShowcaseInventorySlots = 48;
+
         private ICoreClientAPI? clientApi;
         private Harmony? harmony;
         private UIManager? uiManager;
         private CustomDialogElement? dialog;
+        private DialogInventory? showcaseInventory;
+        private DialogInventoryServer? serverInventories;
 
         // Called on server and client
         // Useful for registering block/entity classes on both sides
@@ -33,6 +45,13 @@ namespace ModernVintageGUI
         public override void StartServerSide(ICoreServerAPI api)
         {
             Mod.Logger.Notification("Hello from template mod server side: " + Lang.Get("is2mod:hello"));
+
+            // The server half of the showcase inventory. Without it the grid in the dialog would
+            // be a drawing: the server resolves every slot move by inventory id through the
+            // player's inventory manager, and an inventory it has never heard of is not there to
+            // be found, so the move is dropped and the client corrected back.
+            serverInventories = new DialogInventoryServer(api);
+            serverInventories.Register(ShowcaseInventoryClass, ShowcaseInventorySlots);
         }
 
         public override void StartClientSide(ICoreClientAPI api)
@@ -47,6 +66,10 @@ namespace ModernVintageGUI
             // Routes mouse input from the client event API into the open dialogs
             uiManager = new UIManager(api);
 
+            // This client's copy of the showcase inventory. The contents come from the server
+            // when it is opened - nothing here invents them.
+            showcaseInventory = new DialogInventory(api, ShowcaseInventoryClass, ShowcaseInventorySlots);
+
             api.Input.RegisterHotKey(TestDialogHotkey, "Toggle ModernVintageGUI test dialog", GlKeys.J, HotkeyType.GUIOrOtherControls);
             api.Input.SetHotKeyHandler(TestDialogHotkey, OnDialogHotkey);
         }
@@ -60,7 +83,7 @@ namespace ModernVintageGUI
 
             if (dialog == null)
             {
-                dialog = BuildTestDialog(clientApi);
+                dialog = BuildTestDialog(clientApi, showcaseInventory);
             }
 
             dialog.Toggle();
@@ -68,7 +91,32 @@ namespace ModernVintageGUI
             return true; // true = event was handled
         }
 
-        private static CustomDialogElement BuildTestDialog(ICoreClientAPI capi)
+        private static CustomDialogElement BuildTestDialog(ICoreClientAPI capi, DialogInventory? inventory)
+        {
+            var showcase = new CustomDialogElement(capi, "mvguiShowcase", "Control showcase");
+
+            // The same builder the documentation images are rendered from, so what the hotkey
+            // opens and what the README shows cannot drift apart.
+            Samples.ControlShowcase.Build(showcase, capi, withTitleBar: true, gridInventory: inventory);
+
+            if (inventory != null)
+            {
+                // Opening the inventory is tied to the dialog rather than to the hotkey, so that
+                // closing it any other way - Escape, or from code - closes the inventory too.
+                // A left open inventory would keep accepting moves into a grid nobody can see.
+                showcase.Shown += (sender, e) => inventory.Open();
+                showcase.Hidden += (sender, e) => inventory.Close();
+            }
+
+            return showcase;
+        }
+
+        /// <summary>
+        /// The older ad hoc tree, kept because it is the one the layout regressions were found
+        /// with - a fixed size button next to auto sizing ones, and a row that mixes a label in
+        /// among buttons.
+        /// </summary>
+        private static CustomDialogElement BuildLayoutProbeDialog(ICoreClientAPI capi)
         {
             var testDialog = new CustomDialogElement(capi, "myDialog", "My Title");
 
