@@ -4,7 +4,7 @@ This is an approach to fix the current GUI system for Vintage Story.
 The core idea of this framework is a stack-container based way to structure and maintain a user
 interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for short.
 
-<img src="docs/images/readme-showcase.png" alt="A dialog showing every control: labels, buttons, a context menu, dropdowns, an inventory grid, a checkbox, a text field, a progress bar, tabs and a colour picker" />
+<img src="docs/images/readme-showcase.png" alt="A dialog showing every control: labels, buttons, a context menu, dropdowns, an inventory grid, a checkbox, a text field, a progress bar, tabs, a colour picker and a pixel canvas" />
 
 *Every control in one dialog. This picture is rendered from the same code the test hotkey opens
 in game, so it cannot show a screen that no longer exists.*
@@ -69,7 +69,7 @@ in game, so it cannot show a screen that no longer exists.*
 **Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
 `TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`, `DropdownControl`,
 `ItemTypeSelectorControl`, `CheckboxControl`, `TextInputControl`, `ProgressBarControl`,
-`TabsControl`, `ImageControl`, `ColorPickerControl`.
+`TabsControl`, `ImageControl`, `ColorPickerControl`, `PixelCanvasControl`.
 
 <h2>What is still ongoing</h2>
 

@@ -141,16 +141,28 @@ namespace IS2Mod.ControlTypes
         /// move items in and out of it, and what they leave in it is still there next time.
         /// </param>
         /// <param name="slotCount">How many slots that inventory has. Ignored without it.</param>
+        /// <param name="maxSlotStackSize">
+        /// How much one of those slots holds, on top of what the item itself allows: 8 lets in
+        /// eight planks and still only one pickaxe. Zero, the default, leaves it to the item.
+        /// Ignored without an internal inventory - a grid that was handed an inventory shows
+        /// whatever limits that one was built with.
+        ///
+        /// The server has to declare the same number, the way it declares the size. See
+        /// <see cref="ModernVintageGUI.Inventory.ModInventory.MaxSlotStackSize"/> for who
+        /// enforces it.
+        /// </param>
         public InventoryGridControl(
             int columns = 1,
             string _Name = "",
             bool internalInventory = false,
-            int slotCount = 1)
+            int slotCount = 1,
+            int maxSlotStackSize = 0)
             : base(_Name: _Name, _Margin: 0, _Padding: 0)
         {
             _columns = Math.Max(1, columns);
             _wantsInternalInventory = internalInventory;
             _internalSlotCount = Math.Max(1, slotCount);
+            _internalMaxSlotStackSize = Math.Max(0, maxSlotStackSize);
 
             // The grid is a container of slots and nothing else. InsideOrientation is not used -
             // placement is the lattice below - but None keeps the base measure pass from
@@ -168,9 +180,10 @@ namespace IS2Mod.ControlTypes
         /// A single slot the player can put one thing into, backed by an inventory of its own.
         /// The 1x1 case of the grid, named so a caller does not have to spell it out.
         /// </summary>
-        public static InventoryGridControl SingleSlot(string name = "")
+        public static InventoryGridControl SingleSlot(string name = "", int maxSlotStackSize = 0)
         {
-            return new InventoryGridControl(columns: 1, _Name: name, internalInventory: true, slotCount: 1);
+            return new InventoryGridControl(
+                columns: 1, _Name: name, internalInventory: true, slotCount: 1, maxSlotStackSize: maxSlotStackSize);
         }
 
         #region Building
@@ -298,6 +311,9 @@ namespace IS2Mod.ControlTypes
         private readonly bool _wantsInternalInventory;
         private readonly int _internalSlotCount;
 
+        /// <summary>Per slot cap for the inventory the grid builds itself. 0 = none of its own.</summary>
+        private readonly int _internalMaxSlotStackSize;
+
         /// <summary>
         /// The inventory the grid is showing - the one it was given, or the one it made for
         /// itself when it was built with <c>internalInventory: true</c>.
@@ -375,7 +391,8 @@ namespace IS2Mod.ControlTypes
             SetInventory(ModInventoryAccess.ForPlayer(
                 capi,
                 InternalInventoryName(Dialog?.DialogName, Name),
-                _internalSlotCount));
+                _internalSlotCount,
+                _internalMaxSlotStackSize));
         }
 
         /// <summary>

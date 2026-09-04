@@ -326,7 +326,39 @@ namespace IS2Mod.Input
             return null;
         }
 
+        /// <summary>
+        /// Routes the release to our dialogs - and then always hands it on to the game, for the
+        /// same reason movement is handed on, and with worse consequences when it is not.
+        ///
+        /// ClientMain tracks which buttons are down in <c>InWorldMouseState</c>, and it clears a
+        /// button only after the event comes back unhandled:
+        ///
+        /// <code>
+        /// api.eventapi.TriggerMouseUp(mouseEvent);
+        /// if (mouseEvent.Handled) return true;
+        /// UpdateMouseButtonState(button, InWorldMouseState, value: false);
+        /// </code>
+        ///
+        /// So a release swallowed here leaves the game believing that button is still held. It
+        /// has no effect while a dialog of ours is open, because the world interaction only runs
+        /// while the mouse is grabbed - and then the dialog closes, the mouse is grabbed again,
+        /// and the first frame after that finds a still pressed right button and a block under
+        /// the crosshair. The player closed a block's dialog with Escape and it opened straight
+        /// back up, which is exactly what it looked like.
+        ///
+        /// The press is a different matter and is still swallowed: ClientMain skips setting the
+        /// button *down* for a handled press, which is what keeps a click on our GUI from also
+        /// placing a block behind it. Down belongs to whoever was clicked; up belongs to
+        /// everyone, because everyone has state to let go of.
+        /// </summary>
         private void OnMouseUp(MouseEvent e)
+        {
+            RouteMouseUp(e);
+
+            e.Handled = false;
+        }
+
+        private void RouteMouseUp(MouseEvent e)
         {
             CustomDialogElement? capturing = CapturingDialog();
             if (capturing != null)

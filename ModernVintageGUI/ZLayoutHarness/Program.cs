@@ -9,6 +9,9 @@ using System.Globalization;
 using System.IO;
 using IOPath = System.IO.Path;
 using System.Linq;
+using Vintagestory.API.Client;
+using Vintagestory.API.Common;
+using Vintagestory.API.MathTools;
 
 namespace LayoutHarness
 {
@@ -82,6 +85,8 @@ namespace LayoutHarness
             CheckClipping(failures);
             CheckScrolling(failures);
             CheckMaxSize(failures);
+            CheckPixelCanvasPainting(failures);
+            CheckPixelCanvasAreas(failures);
 
             Console.WriteLine();
 
@@ -299,6 +304,237 @@ namespace LayoutHarness
         /// composite that ended up in the wrong place in the tree makes Tab jump around the
         /// dialog without anything looking broken.
         /// </summary>
+        /// <summary>
+        /// A stroke on a pixel canvas: the button that paints, the pixel under the cursor, and
+        /// the line between two reports of the mouse.
+        ///
+        /// The last one is why this check exists. A mouse moving across a canvas reports a
+        /// handful of positions a second, so a stroke that painted only where the mouse was seen
+        /// would be a dotted line - and that is the kind of thing that looks like a slow computer
+        /// rather than a bug, and never gets reported.
+        /// </summary>
+        private static void CheckPixelCanvasPainting(List<string> failures)
+        {
+            Console.WriteLine("### pixel canvas painting");
+            Console.WriteLine("A drag paints every pixel between where the mouse was seen, and only in draw mode.");
+            Console.WriteLine();
+
+            var root = new RectangleControl(_Name: "root");
+            root.InsideOrientation = Orientation.Top;
+            root.Padding = 0;
+
+            var canvas = new PixelCanvasControl(columns: 16, rows: 16, unscaledPixelSize: 10, _Name: "canvas")
+            {
+                DrawColor = new ElementColor(220, 60, 60, 255)
+            };
+
+            root.Children.Add(canvas);
+            root.PerformLayout();
+
+            var painted = new List<string>();
+            canvas.PixelPainted += (sender, e) => painted.Add($"{e.X},{e.Y}" + (e.ByPlayer ? "" : "!"));
+
+            // Draw mode is off, so this stroke has to do nothing at all.
+            Stroke(canvas, 1, 1, 5, 1);
+
+            if (painted.Count > 0)
+            {
+                failures.Add("[pixel canvas] painted with draw mode off: " + string.Join(" ", painted));
+                Console.WriteLine("  PAINTED WITH DRAW MODE OFF");
+                return;
+            }
+
+            Console.WriteLine("  draw mode off: nothing painted");
+
+            canvas.DrawMode = true;
+
+            // The left button when the right one paints: also nothing.
+            Stroke(canvas, 1, 1, 5, 1, EnumMouseButton.Left);
+
+            if (painted.Count > 0)
+            {
+                failures.Add("[pixel canvas] painted with the wrong button: " + string.Join(" ", painted));
+                Console.WriteLine("  PAINTED WITH THE WRONG BUTTON");
+                return;
+            }
+
+            Console.WriteLine("  the other button: nothing painted");
+
+            // One press and one move, from a corner to a point that is neither on a row, a
+            // column nor the diagonal - so nothing about the line is symmetric.
+            Stroke(canvas, 2, 2, 13, 7);
+
+            if (painted.Count == 0)
+            {
+                failures.Add("[pixel canvas] a stroke in draw mode painted nothing");
+                Console.WriteLine("  NOTHING PAINTED");
+                return;
+            }
+
+            Console.WriteLine($"  stroke from 2,2 to 13,7 painted {painted.Count} pixels");
+
+            if (canvas.GetPixel(2, 2).R != 220 || canvas.GetPixel(13, 7).R != 220)
+            {
+                failures.Add("[pixel canvas] the stroke did not reach both of its ends");
+                Console.WriteLine("  ENDS MISSING");
+                return;
+            }
+
+            // Every step of the line has to touch the one before it. A gap means the line was
+            // sampled rather than drawn.
+            var cells = new List<(int X, int Y)>();
+
+            for (int y = 0; y < canvas.Rows; y++)
+            {
+                for (int x = 0; x < canvas.Columns; x++)
+                {
+                    if (canvas.GetPixel(x, y).A > 0)
+                        cells.Add((x, y));
+                }
+            }
+
+            // 13 - 2 = 11 steps across, so a line that skips nothing has twelve pixels in it.
+            if (cells.Count != 12)
+            {
+                failures.Add($"[pixel canvas] a line from 2,2 to 13,7 should be 12 pixels, got {cells.Count}");
+                Console.WriteLine($"  WRONG LENGTH: {cells.Count}");
+                return;
+            }
+
+            foreach ((int X, int Y) cell in cells)
+            {
+                bool touches = cells.Any(other =>
+                    (other.X != cell.X || other.Y != cell.Y)
+                    && Math.Abs(other.X - cell.X) <= 1
+                    && Math.Abs(other.Y - cell.Y) <= 1);
+
+                if (touches)
+                    continue;
+
+                failures.Add($"[pixel canvas] the pixel at {cell.X},{cell.Y} stands alone - the line has a gap");
+                Console.WriteLine($"  GAP AT {cell.X},{cell.Y}");
+                return;
+            }
+
+            Console.WriteLine("  every pixel of the line touches the next, no gaps");
+
+            // And what a player painted is reported as theirs, so a mod can tell it from what it
+            // set itself and not send the whole canvas back to the server.
+            if (painted.Any(entry => entry.EndsWith("!")))
+            {
+                failures.Add("[pixel canvas] a pixel the player painted was reported as set from code");
+                Console.WriteLine("  WRONG SOURCE REPORTED");
+                return;
+            }
+
+            Console.WriteLine("  all of them reported as painted by the player");
+        }
+
+        /// <summary>
+        /// Areas on a pixel canvas: what hangs together, what an area lookup gives back, and
+        /// what the outline refuses to draw.
+        /// </summary>
+        private static void CheckPixelCanvasAreas(List<string> failures)
+        {
+            Console.WriteLine("### pixel canvas areas");
+            Console.WriteLine("Areas hang together edge to edge, and an outline is only drawn around one that does.");
+            Console.WriteLine();
+
+            var red = new ElementColor(220, 60, 60, 255);
+            var blue = new ElementColor(60, 120, 220, 255);
+
+            var canvas = new PixelCanvasControl(columns: 12, rows: 12, _Name: "canvas");
+
+            // A red line of five, a red pixel on its own further along, and a blue block that
+            // touches the line - so colour blind and colour sensitive have to disagree.
+            for (int x = 2; x <= 6; x++)
+            {
+                canvas.SetPixel(x, 4, red);
+            }
+
+            canvas.SetPixel(9, 4, red);
+
+            canvas.SetPixel(6, 5, blue);
+            canvas.SetPixel(6, 6, blue);
+
+            // Connectivity, on sets rather than on the canvas.
+            var straight = new[] { new Vec2i(1, 1), new Vec2i(2, 1), new Vec2i(3, 1) };
+            var diagonal = new[] { new Vec2i(1, 1), new Vec2i(2, 2) };
+            var apart = new[] { new Vec2i(1, 1), new Vec2i(1, 2), new Vec2i(5, 5) };
+
+            Check(failures, PixelCanvasControl.AreConnected(straight), "three in a row hang together");
+            Check(failures, !PixelCanvasControl.AreConnected(diagonal), "two on a diagonal do not");
+            Check(failures, !PixelCanvasControl.AreConnected(apart), "and neither does one off on its own");
+            Check(failures, PixelCanvasControl.AreConnected(new[] { new Vec2i(3, 3) }), "a single pixel is an area");
+            Check(failures, !PixelCanvasControl.AreConnected(Array.Empty<Vec2i>()), "nothing is not an area");
+
+            // Pointing at one pixel of the line gives back the line - and only the line.
+            Vec2i[] line = canvas.GetArea(4, 4);
+
+            Check(failures, line.Length == 5, $"pointing at the red line gives back its five pixels, got {line.Length}");
+            Check(failures, line.All(p => p.Y == 4 && p.X >= 2 && p.X <= 6), "all of them on the line");
+            Check(failures, !line.Any(p => p.X == 9), "and not the loose red pixel that does not touch it");
+
+            // Colour blind, the same point picks up the blue block hanging off the line.
+            Vec2i[] blob = canvas.GetArea(4, 4, colorSensitive: false);
+
+            Check(failures, blob.Length == 7, $"colour blind, the blue block comes along, got {blob.Length}");
+
+            // An outline is only drawn around something that hangs together.
+            Check(failures, canvas.SetHighlight(line), "an area can be outlined");
+            Check(failures, canvas.HasHighlight, "and the canvas says so");
+
+            Check(failures, !canvas.SetHighlight(apart.ToList()), "a set with a gap in it is refused");
+            Check(failures, canvas.HighlightedArea.Length == 5, "and the refused one did not replace the old outline");
+
+            // Colour sensitive outlining refuses an area of two colours.
+            Check(failures, !canvas.SetHighlight(blob, colorSensitive: true), "two colours are refused when colour matters");
+            Check(failures, canvas.SetHighlight(blob), "and taken when it does not");
+
+            canvas.ClearHighlight();
+            Check(failures, !canvas.HasHighlight, "and it can be cleared again");
+        }
+
+        private static void Check(List<string> failures, bool condition, string what)
+        {
+            Console.WriteLine((condition ? "  ok   " : "  FAIL ") + what);
+
+            if (!condition)
+            {
+                failures.Add("[pixel canvas] " + what);
+            }
+        }
+
+        /// <summary>
+        /// Presses on one pixel, moves to another in one jump, and lets go - the way the mouse
+        /// arrives when it is moved quickly.
+        /// </summary>
+        private static void Stroke(
+            PixelCanvasControl canvas,
+            int fromX,
+            int fromY,
+            int toX,
+            int toY,
+            EnumMouseButton button = EnumMouseButton.Right)
+        {
+            canvas.InvokeEventMouseDown(At(canvas, fromX, fromY, button));
+            canvas.InvokeEventMouseMove(At(canvas, toX, toY, button));
+            canvas.InvokeEventMouseUp(At(canvas, toX, toY, button));
+        }
+
+        /// <summary>The middle of a canvas pixel, as a mouse event.</summary>
+        private static MouseEvent At(PixelCanvasControl canvas, int x, int y, EnumMouseButton button)
+        {
+            LayoutRect box = canvas.ContentBox();
+            double pixel = canvas.PixelSize;
+
+            return new MouseEvent(
+                (int)(box.X + (x + 0.5) * pixel),
+                (int)(box.Y + (y + 0.5) * pixel),
+                button,
+                0);
+        }
+
         private static void CheckFocusOrder(List<string> failures)
         {
             Console.WriteLine("### focus order");

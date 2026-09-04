@@ -78,6 +78,25 @@ namespace ModernVintageGUI.Inventory
         /// <summary>How far a player may be from a block and still open its inventory.</summary>
         private const double MaxBlockReach = 12.0;
 
+        /// <summary>
+        /// What a registered inventory is: how many slots it has, and how much one of them
+        /// holds. Both are the server's word - a client says which inventory it wants to open
+        /// and never how big it is or what fits in it.
+        /// </summary>
+        private readonly struct Declared
+        {
+            public Declared(int size, int maxSlotStackSize)
+            {
+                Size = Math.Max(1, size);
+                MaxSlotStackSize = Math.Max(0, maxSlotStackSize);
+            }
+
+            public int Size { get; }
+
+            /// <summary>Per slot cap on top of the item's own maximum, or 0 for none.</summary>
+            public int MaxSlotStackSize { get; }
+        }
+
         private sealed class PlayerEntry
         {
             public ModInventory Inventory = null!;
@@ -87,8 +106,8 @@ namespace ModernVintageGUI.Inventory
 
         private readonly ICoreServerAPI _sapi;
 
-        private readonly Dictionary<string, int> _playerSizes = new Dictionary<string, int>();
-        private readonly Dictionary<string, int> _sharedSizes = new Dictionary<string, int>();
+        private readonly Dictionary<string, Declared> _declaredPlayer = new Dictionary<string, Declared>();
+        private readonly Dictionary<string, Declared> _declaredShared = new Dictionary<string, Declared>();
 
         private readonly Dictionary<string, PlayerEntry> _playerInventories = new Dictionary<string, PlayerEntry>();
         private readonly Dictionary<string, ModInventory> _sharedInventories = new Dictionary<string, ModInventory>();
@@ -108,9 +127,12 @@ namespace ModernVintageGUI.Inventory
         /// Declares an inventory every player has one of - a personal stash, a loadout. It is
         /// created when the player first opens it and saved with that player.
         /// </summary>
-        public void RegisterPlayerInventory(string className, int size)
+        /// <param name="maxSlotStackSize">
+        /// How much one slot holds, on top of what the item itself allows. 0 = no cap of its own.
+        /// </param>
+        public void RegisterPlayerInventory(string className, int size, int maxSlotStackSize = 0)
         {
-            _playerSizes[Require(className, nameof(className))] = Math.Max(1, size);
+            _declaredPlayer[Require(className, nameof(className))] = new Declared(size, maxSlotStackSize);
         }
 
         /// <summary>
@@ -118,9 +140,12 @@ namespace ModernVintageGUI.Inventory
         /// or dialogs can open it, and they all see the same contents - the server holds one
         /// instance and syncs it to everyone who has it open.
         /// </summary>
-        public void RegisterSharedInventory(string name, int size)
+        /// <param name="maxSlotStackSize">
+        /// How much one slot holds, on top of what the item itself allows. 0 = no cap of its own.
+        /// </param>
+        public void RegisterSharedInventory(string name, int size, int maxSlotStackSize = 0)
         {
-            _sharedSizes[Require(name, nameof(name))] = Math.Max(1, size);
+            _declaredShared[Require(name, nameof(name))] = new Declared(size, maxSlotStackSize);
         }
 
         private static string Require(string value, string parameter)
@@ -134,14 +159,14 @@ namespace ModernVintageGUI.Inventory
         /// <summary>The shared inventory under this name, for server code that wants to fill it.</summary>
         public ModInventory? GetShared(string name)
         {
-            return _sharedSizes.ContainsKey(name) ? LoadShared(name) : null;
+            return _declaredShared.ContainsKey(name) ? LoadShared(name) : null;
         }
 
         /// <summary>This player's copy of a per player inventory.</summary>
         public ModInventory? GetForPlayer(IServerPlayer player, string className)
         {
-            return _playerSizes.TryGetValue(className, out int size)
-                ? LoadForPlayer(player, className, size).Inventory
+            return _declaredPlayer.TryGetValue(className, out Declared declared)
+                ? LoadForPlayer(player, className, declared).Inventory
                 : null;
         }
         #endregion
@@ -184,11 +209,11 @@ namespace ModernVintageGUI.Inventory
                     return ResolveBlock(player, message.Key);
 
                 case ModInventoryKind.Shared:
-                    return _sharedSizes.ContainsKey(message.Key) ? LoadShared(message.Key) : Unknown(player, message);
+                    return _declaredShared.ContainsKey(message.Key) ? LoadShared(message.Key) : Unknown(player, message);
 
                 case ModInventoryKind.Player:
-                    return _playerSizes.TryGetValue(message.Key, out int size)
-                        ? LoadForPlayer(player, message.Key, size).Inventory
+                    return _declaredPlayer.TryGetValue(message.Key, out Declared declared)
+                        ? LoadForPlayer(player, message.Key, declared).Inventory
                         : Unknown(player, message);
 
                 default:
@@ -256,14 +281,14 @@ namespace ModernVintageGUI.Inventory
         #endregion
 
         #region Contents
-        private PlayerEntry LoadForPlayer(IServerPlayer player, string className, int size)
+        private PlayerEntry LoadForPlayer(IServerPlayer player, string className, Declared declared)
         {
             string id = ModInventoryAccess.PlayerInventoryId(className, player.PlayerUID);
 
             if (_playerInventories.TryGetValue(id, out PlayerEntry? existing))
                 return existing;
 
-            var inventory = new ModInventory(size, id, _sapi);
+            var inventory = new ModInventory(declared.Size, id, _sapi, declared.MaxSlotStackSize);
             Restore(inventory, player.GetModdata(ModdataKey(className)), id);
 
             var entry = new PlayerEntry
@@ -284,7 +309,8 @@ namespace ModernVintageGUI.Inventory
             if (_sharedInventories.TryGetValue(id, out ModInventory? existing))
                 return existing;
 
-            var inventory = new ModInventory(_sharedSizes[name], id, _sapi);
+            Declared declared = _declaredShared[name];
+            var inventory = new ModInventory(declared.Size, id, _sapi, declared.MaxSlotStackSize);
             Restore(inventory, _sapi.WorldManager.SaveGame.GetData(ModdataKey(name)), id);
 
             _sharedInventories[id] = inventory;
@@ -343,7 +369,7 @@ namespace ModernVintageGUI.Inventory
                 }
             }
 
-            foreach (KeyValuePair<string, int> shared in _sharedSizes)
+            foreach (KeyValuePair<string, Declared> shared in _declaredShared)
             {
                 if (_sharedInventories.TryGetValue(ModInventoryAccess.SharedInventoryId(shared.Key), out ModInventory? inventory))
                 {
@@ -402,6 +428,7 @@ namespace ModernVintageGUI.Inventory
         private readonly ModInventoryKind _kind;
         private readonly string _key;
         private readonly int _size;
+        private readonly int _maxSlotStackSize;
         private readonly string _id;
 
         private IInventory? _inventory;
@@ -413,13 +440,15 @@ namespace ModernVintageGUI.Inventory
             string key,
             string id,
             int size,
-            IInventory? inventory)
+            IInventory? inventory,
+            int maxSlotStackSize = 0)
         {
             _capi = capi ?? throw new ArgumentNullException(nameof(capi));
             _kind = kind;
             _key = key;
             _id = id;
             _size = size;
+            _maxSlotStackSize = maxSlotStackSize;
             _inventory = inventory;
 
             ModInventoryChannel.Client(capi);
@@ -453,17 +482,17 @@ namespace ModernVintageGUI.Inventory
         /// copy on this side, and a copy with fewer slots would throw when an update for a slot
         /// it does not have arrives.
         /// </summary>
-        public static ModInventoryAccess ForShared(ICoreClientAPI capi, string name, int size)
+        public static ModInventoryAccess ForShared(ICoreClientAPI capi, string name, int size, int maxSlotStackSize = 0)
         {
             return new ModInventoryAccess(
-                capi, ModInventoryKind.Shared, name, SharedInventoryId(name), size, null);
+                capi, ModInventoryKind.Shared, name, SharedInventoryId(name), size, null, maxSlotStackSize);
         }
 
         /// <summary>One the server keeps per player, under this class name.</summary>
-        public static ModInventoryAccess ForPlayer(ICoreClientAPI capi, string className, int size)
+        public static ModInventoryAccess ForPlayer(ICoreClientAPI capi, string className, int size, int maxSlotStackSize = 0)
         {
             return new ModInventoryAccess(
-                capi, ModInventoryKind.Player, className, "", size, null);
+                capi, ModInventoryKind.Player, className, "", size, null, maxSlotStackSize);
         }
 
         internal static string SharedInventoryId(string name)
@@ -557,7 +586,10 @@ namespace ModernVintageGUI.Inventory
                 ? PlayerInventoryId(_key, playerUid)
                 : _id;
 
-            _inventory = new ModInventory(_size, id, _capi);
+            // The same cap the server registered. Without it this copy would let the player
+            // drop more into a slot than the server will keep, and the correction would arrive
+            // a moment later - the limit has to look the same on both sides.
+            _inventory = new ModInventory(_size, id, _capi, _maxSlotStackSize);
             return _inventory;
         }
     }

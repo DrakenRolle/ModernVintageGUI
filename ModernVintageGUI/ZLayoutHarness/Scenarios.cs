@@ -90,6 +90,15 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "pixel-canvas",
+                Description = "A pixel canvas with a picture painted into it, the grid on, and a "
+                            + "second one at half the pixel size. Both hold the same picture, so "
+                            + "the two show what the pixel size does and nothing else.",
+                Build = BuildPixelCanvas
+            };
+
+            yield return new Scenario
+            {
                 Name = "keyboard-focus",
                 Description = "Three buttons, the middle one holding the keyboard focus and the "
                             + "last one both focused and hovered - the ring and the hover look "
@@ -170,6 +179,38 @@ namespace LayoutHarness
 
             root.InsideOrientation = Orientation.Top;
             root.Padding = 10;
+
+            return root;
+        }
+
+        /// <summary>
+        /// Two canvases holding the same picture at different pixel sizes. Drawn through the
+        /// real pixel writing path - SetPixel and SetPixels - so what the picture shows is what
+        /// the control does with it.
+        /// </summary>
+        private static RectangleControl BuildPixelCanvas()
+        {
+            RectangleControl root = CreateRoot();
+            root.InsideOrientation = Orientation.Left;
+
+            var big = new PixelCanvasControl(columns: 16, rows: 16, unscaledPixelSize: 10, _Name: "canvas")
+            {
+                ShowGrid = true
+            };
+
+            var small = new PixelCanvasControl(columns: 16, rows: 16, unscaledPixelSize: 5, _Name: "canvasSmall");
+
+            foreach (PixelCanvasControl canvas in new[] { big, small })
+            {
+                ModernVintageGUI.Samples.ControlShowcase.PaintHouse(canvas);
+                root.Children.Add(canvas);
+            }
+
+            // Point at one pixel of the roof and outline the whole roof: the area helper and the
+            // outline in one go. The line has to run around the outside of it and nowhere
+            // between two of its pixels.
+            big.HighlightColor = new ElementColor(255, 240, 150, 255);
+            big.HighlightAreaAt(8, 5);
 
             return root;
         }

@@ -1015,9 +1015,34 @@ namespace IS2Mod.ControlTypes.Custom
 
                 _cursorTexture?.Dispose();
                 _cursorTexture = null;
+
+                DisposeChildren(this);
             }
 
             _isDisposed = true;
+        }
+
+        /// <summary>
+        /// Disposes every control in the tree that has something to dispose.
+        ///
+        /// Some controls own more than managed memory - a popup of their own, a Cairo image the
+        /// size of a canvas - and until now each of them had to be disposed by whoever built it,
+        /// which is a rule nobody reads. The dialog owns the tree, so the dialog lets it go.
+        ///
+        /// Every one of them has to survive being disposed twice, because a caller that already
+        /// did it by hand is doing nothing wrong.
+        /// </summary>
+        private static void DisposeChildren(UIControl control)
+        {
+            foreach (UIControl child in control.Children)
+            {
+                DisposeChildren(child);
+
+                if (child is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
         }
         #endregion
     }

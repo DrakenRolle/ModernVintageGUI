@@ -29,24 +29,57 @@ namespace ModernVintageGUI.Inventory
     /// </summary>
     public abstract class ModInventoryBlockEntity : BlockEntityContainer, IModInventoryHolder
     {
-        private readonly ModInventory _inventory;
+        private readonly int _declaredSize;
+        private readonly int _declaredMaxSlotStackSize;
         private readonly string _className;
 
-        protected ModInventoryBlockEntity(int size, string inventoryClassName)
+        private ModInventory? _inventory;
+
+        /// <param name="maxSlotStackSize">
+        /// How much one slot may hold, on top of what the item itself allows. Zero, the default,
+        /// leaves it to the item. Both sides build the block entity the same way, so the cap is
+        /// the server's rule and not a suggestion from the client - see
+        /// <see cref="ModInventory.MaxSlotStackSize"/>.
+        /// </param>
+        protected ModInventoryBlockEntity(int size, string inventoryClassName, int maxSlotStackSize = 0)
         {
-            _inventory = new ModInventory(size);
+            _declaredSize = size;
+            _declaredMaxSlotStackSize = maxSlotStackSize;
             _className = inventoryClassName;
         }
 
-        public override InventoryBase Inventory => _inventory;
+        public override InventoryBase Inventory => ModInventory;
 
         public override string InventoryClassName => _className;
 
         /// <summary>The inventory, already bound once the block entity has been initialized.</summary>
-        public ModInventory ModInventory => _inventory;
+        public ModInventory ModInventory => _inventory ??= new ModInventory(SlotCount, MaxSlotStackSize);
+
+        /// <summary>
+        /// How many slots this block entity has. The constructor argument by default; override
+        /// it to decide per block, which is what a block with variants needs:
+        ///
+        /// <code>
+        /// protected override int SlotCount => Block?.Variant["metal"] == "titanium" ? 4 : 1;
+        /// </code>
+        ///
+        /// The inventory is built the first time anything asks for it, which is late enough for
+        /// <c>Block</c> to be set - the game assigns it before it loads the contents and before
+        /// Initialize - and early enough to be the inventory the contents are loaded into. That
+        /// is the whole window this may depend on: <c>Block</c> and <c>Pos</c>, nothing that
+        /// arrives later, because a slot count that changes afterwards would silently drop
+        /// whatever was in the slots that went away.
+        /// </summary>
+        protected virtual int SlotCount => _declaredSize;
+
+        /// <summary>
+        /// How much one slot holds, on top of what the item itself allows. As with
+        /// <see cref="SlotCount"/>, override it to decide per block.
+        /// </summary>
+        protected virtual int MaxSlotStackSize => _declaredMaxSlotStackSize;
 
         /// <inheritdoc/>
-        ModInventory? IModInventoryHolder.GetModInventory() => _inventory;
+        ModInventory? IModInventoryHolder.GetModInventory() => ModInventory;
     }
 
     /// <summary>
@@ -59,7 +92,7 @@ namespace ModernVintageGUI.Inventory
     /// </summary>
     public interface IModInventoryHolder
     {
-        /// <summary>The inventory, or null when there is none to open.</summary>
+        /// <summary>The inventory a dialog may open, or null when there is none.</summary>
         ModInventory? GetModInventory();
     }
 }

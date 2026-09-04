@@ -118,12 +118,101 @@ namespace ModernVintageGUI.Samples
                 IsAutoSize = false
             };
 
-            picker.ColorChanged += (sender, color) =>
-                capi?.ShowChatMessage($"Colour: {color.R}, {color.G}, {color.B}");
-
             column.Children.Add(picker);
 
+            column.Children.Add(Heading("Pixel canvas"));
+
+            var canvas = new PixelCanvasControl(columns: 16, rows: 16, unscaledPixelSize: 8, _Name: "canvas")
+            {
+                DrawMode = true,
+                ShowGrid = true,
+                DrawColor = picker.SelectedColor,
+                HighlightColor = new ElementColor(255, 240, 150, 255)
+            };
+
+            PaintHouse(canvas);
+
+            // The picker and the canvas together are the point: pick a colour on the left, hold
+            // the right button on the canvas and draw with it.
+            picker.ColorChanged += (sender, color) => canvas.DrawColor = color;
+
+            // And the area helpers, live: whatever the cursor is over gets outlined - the roof as
+            // one shape, the wall as another, the sky as the rest. GetArea decides what belongs
+            // together, the outline follows the same rule, and nothing is drawn between two
+            // pixels of the same area.
+            //
+            // SetHighlight does nothing when the area has not changed, which is what keeps a
+            // mouse move from redrawing the dialog several dozen times a second.
+            canvas.MouseMove += (sender, e) =>
+            {
+                if (canvas.TryGetPixelAt(e.X, e.Y, out int x, out int y))
+                {
+                    canvas.HighlightAreaAt(x, y);
+                }
+                else
+                {
+                    canvas.ClearHighlight();
+                }
+            };
+
+            canvas.Exit += (sender, e) => canvas.ClearHighlight();
+
+            column.Children.Add(canvas);
+
             return column;
+        }
+
+        /// <summary>
+        /// A sky, a hill and a house, in sixteen by sixteen.
+        ///
+        /// Small enough to read as a check as well as a picture: if it comes out mirrored,
+        /// shifted or scaled wrong that is obvious at a glance, which a field of random colours
+        /// would not be. It is also four areas that are each one colour and hang together, which
+        /// is what makes it worth hovering.
+        /// </summary>
+        public static void PaintHouse(PixelCanvasControl canvas)
+        {
+            var sky = new ElementColor(78, 132, 190, 255);
+            var grass = new ElementColor(84, 140, 60, 255);
+            var wall = new ElementColor(196, 120, 66, 255);
+            var roof = new ElementColor(120, 52, 44, 255);
+            var window = new ElementColor(238, 220, 120, 255);
+
+            canvas.Fill(sky);
+
+            for (int y = 12; y < canvas.Rows; y++)
+            {
+                for (int x = 0; x < canvas.Columns; x++)
+                {
+                    canvas.SetPixel(x, y, grass);
+                }
+            }
+
+            // The house, as a block of pixels: the array overload, indexed the way the picture
+            // reads - row first.
+            var house = new ElementColor[5, 6];
+
+            for (int row = 0; row < 5; row++)
+            {
+                for (int column = 0; column < 6; column++)
+                {
+                    house[row, column] = wall;
+                }
+            }
+
+            house[2, 2] = window;
+            house[2, 3] = window;
+
+            canvas.SetPixels(5, 7, house);
+
+            // A roof, one pixel narrower on each side going up.
+            for (int row = 0; row < 3; row++)
+            {
+                for (int column = row; column < 8 - row; column++)
+                {
+                    canvas.SetPixel(4 + column, 4 + row, roof);
+                }
+            }
         }
 
         /// <summary>
