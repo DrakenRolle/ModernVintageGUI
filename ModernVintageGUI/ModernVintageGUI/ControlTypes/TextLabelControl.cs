@@ -129,37 +129,55 @@ namespace IS2Mod.ControlTypes
         }
 
         /// <summary>
+        /// The size the text itself needs, whatever the box was stretched to.
+        ///
+        /// A container that places the label by hand needs this: a button with an icon has to
+        /// know how wide the caption is to centre the two together, and it cannot read that off
+        /// <see cref="UIControl.Size"/>, which is whatever the button stretched the label to.
+        /// </summary>
+        public PointD MeasureNaturalSize()
+        {
+            return MeasureText();
+        }
+
+        /// <summary>
         /// Measures the text without touching any state, so that repeated layout passes always
         /// produce the same result.
         /// </summary>
         private PointD MeasureText()
         {
-            // If no text, return minimum size
-            if (string.IsNullOrEmpty(Text))
-            {
-                return new PointD(ScaledPadding * 2, ScaledPadding * 2 + ScaledFontSize);
-            }
-
-            // Measure text with Cairo
             using (ImageSurface tempSurface = new ImageSurface(Format.Argb32, 1, 1))
             using (Context ctx = new Context(tempSurface))
             {
                 SetupFont(ctx);
 
+                // The height of a line, from the font rather than from the size it was asked
+                // for. Those are not the same number: a 16 point font puts its ascent above the
+                // baseline and its descent below it, and the two together are a good deal more
+                // than 16. Measuring with the nominal size is the reason a button came out too
+                // short for its own caption and the tail of a "p" hung out of the bottom - the
+                // text was drawn correctly, the box around it was simply wrong.
+                Cairo.FontExtents fe = ctx.FontExtents;
+                double lineHeight = fe.Ascent + fe.Descent;
+
+                if (string.IsNullOrEmpty(Text))
+                {
+                    return new PointD(ScaledPadding * 2, lineHeight + ScaledPadding * 2);
+                }
+
                 if (WordWrap && Size.X > 0)
                 {
-                    // Calculate wrapped text size
                     PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2));
                     return new PointD(Size.X, wrappedSize.Y + (ScaledPadding * 2));
                 }
 
-                // Calculate single-line text size. XAdvance, not Width: Width is the inked
-                // bounding box and leaves out the side bearings, which makes the box too narrow
-                // for the text it is supposed to hold.
+                // XAdvance, not Width: Width is the inked bounding box and leaves out the side
+                // bearings, which makes the box too narrow for the text it is supposed to hold.
                 TextExtents te = ctx.TextExtents(Text);
+
                 return new PointD(
                     te.XAdvance + (ScaledPadding * 2),
-                    ScaledFontSize + (ScaledPadding * 2)
+                    lineHeight + (ScaledPadding * 2)
                 );
             }
         }
@@ -243,19 +261,40 @@ namespace IS2Mod.ControlTypes
             TextExtents te = ctx.TextExtents(Text);
             Cairo.FontExtents fe = ctx.FontExtents;
 
-            (double x, double y) = GetTextPosition(te, fe);
+            (double x, double y) = GetTextPosition(te, fe, CapHeight(ctx));
 
             ctx.MoveTo(x, y);
             ctx.ShowText(Text);
         }
 
+        /// <summary>
+        /// How tall a capital letter is, measured from the font in use.
+        ///
+        /// This is what vertical centring has to be built on, and the reason is Lora: at 24 it
+        /// has an ascent of 29 and a descent of 7. Centring the line box those two make - which
+        /// is what this did - leaves 17 pixels of air above the letters and 12 below, because
+        /// most of the ascent is room for accents that "Save" does not use. The text then sits
+        /// visibly high in a button while being, on paper, perfectly centred.
+        ///
+        /// A capital is used rather than the string's own ink on purpose. Centring each string
+        /// by its own extents would put "Save" and "Open" on different baselines, because one of
+        /// them has a descender - a row of buttons would have its captions at different heights.
+        /// </summary>
+        private static double CapHeight(Context ctx)
+        {
+            return ctx.TextExtents("H").Height;
+        }
+
         // FIXED: Corrected text positioning logic, especially for vertical centering
-        private (double x, double y) GetTextPosition(TextExtents te, Cairo.FontExtents fe)
+        private (double x, double y) GetTextPosition(TextExtents te, Cairo.FontExtents fe, double capHeight)
         {
             double x = Position.X;
             double y = Position.Y;
 
             double baselineOffset = fe.Ascent;
+
+            // The baseline that puts a capital letter in the middle of the box.
+            double middleBaseline = Position.Y + (Size.Y / 2) + (capHeight / 2);
 
             switch (Orientation)
             {
@@ -268,7 +307,7 @@ namespace IS2Mod.ControlTypes
                 case TextOrientation.Center:
                 case TextOrientation.MiddleCenter:
                     x = Position.X + (Size.X - te.XAdvance) / 2;
-                    y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
+                    y = middleBaseline;
                     break;
 
                 case TextOrientation.Right:
@@ -284,12 +323,12 @@ namespace IS2Mod.ControlTypes
 
                 case TextOrientation.MiddleLeft:
                     x = Position.X + ScaledPadding;
-                    y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
+                    y = middleBaseline;
                     break;
 
                 case TextOrientation.MiddleRight:
                     x = Position.X + Size.X - te.XAdvance - ScaledPadding;
-                    y = Position.Y + (Size.Y / 2) + (fe.Ascent - fe.Descent) / 2;
+                    y = middleBaseline;
                     break;
 
                 case TextOrientation.BottomLeft:

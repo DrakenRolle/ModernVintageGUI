@@ -960,6 +960,19 @@ namespace IS2Mod.ControlTypes.Custom
             }
         }
 
+        /// <summary>
+        /// A typed character on its way to the focused control. Only a control that asked for
+        /// every key gets one - a dialog full of buttons has no use for characters, and
+        /// swallowing them there would stop the player from typing in the chat.
+        /// </summary>
+        public void HandleKeyPress(Events.KeyEventArgs e)
+        {
+            if (!IsVisible || FocusedControl?.WantsAllKeyboardInput != true)
+                return;
+
+            FocusedControl.InvokeEventKeyPress(e);
+        }
+
         public void HandleKeyUp(Events.KeyEventArgs e)
         {
             if (!IsVisible)

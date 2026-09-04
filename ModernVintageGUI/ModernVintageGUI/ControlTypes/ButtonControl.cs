@@ -1,5 +1,7 @@
 using Cairo;
 using IS2Mod.Enums;
+using ModernVintageGUI.ControlTypes;
+using System;
 using System.Diagnostics;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -22,6 +24,89 @@ namespace IS2Mod.ControlTypes
         {
             get => _textLabel.Text;
             set => _textLabel.Text = value;
+        }
+
+        /// <summary>
+        /// One of the game's GUI icons drawn on the button - a wrench, a trash can, an arrow.
+        /// With a caption it sits to the left of it; on its own it is centred, which is the
+        /// icon-only button.
+        /// </summary>
+        public string? IconName { get; set; }
+
+        /// <summary>A picture from the mod's assets instead of a named icon.</summary>
+        public AssetLocation? IconAsset { get; set; }
+
+        /// <summary>
+        /// How big the icon is drawn, in author units. Zero - the default - takes it from the
+        /// button instead, so the icon grows with the button and with the GUI scale rather than
+        /// sitting there at a fixed size no matter how tall the button got.
+        /// </summary>
+        public double UnscaledIconSize { get; set; }
+
+        /// <summary>How much of the button's height an automatically sized icon takes.</summary>
+        public double IconHeightFraction { get; set; } = 0.6;
+
+        /// <summary>How far the icon sits from the left edge when there is a caption too.</summary>
+        public double UnscaledIconInset { get; set; } = 8.0;
+
+        /// <summary>The icon's edge length in device pixels, however it was decided.</summary>
+        private double IconSize()
+        {
+            double fromButton = Size.Y * IconHeightFraction;
+            double requested = UnscaledIconSize > 0 ? UnscaledIconSize * LayoutScale : fromButton;
+
+            return Math.Max(0, Math.Min(requested, Math.Min(Size.X, Size.Y)));
+        }
+
+        /// <summary>The gap between the icon and the caption, when there is both.</summary>
+        private double IconGap()
+        {
+            return HasIcon && !string.IsNullOrEmpty(Text) ? UnscaledIconInset * LayoutScale : 0;
+        }
+
+        /// <summary>
+        /// How wide the icon and the caption are together.
+        ///
+        /// The two are placed as one block and that block is centred, which is the difference
+        /// between a button that reads right and one where the caption sits off to the right of
+        /// the middle: indenting the label and then centring it in what is left over pushes it
+        /// half the icon's width too far.
+        /// </summary>
+        private double GroupWidth(double textWidth)
+        {
+            return (HasIcon ? IconSize() : 0) + IconGap() + textWidth;
+        }
+
+        /// <summary>Where the icon was placed last, so the drawing agrees with the layout.</summary>
+        private double _iconLeft;
+
+        private bool HasIcon => IconName != null || IconAsset != null;
+
+        private bool _showEmboss = true;
+
+        /// <summary>
+        /// The bevel: a light edge along the top left and a dark one along the bottom right.
+        /// On by default, because it is what the game's own buttons have.
+        ///
+        /// It is a switch because the light edge is deliberately blurred and reaches a little
+        /// past the button, which reads as depth on a button standing on its own and as noise on
+        /// a panel packed with them. A dense panel can turn it off and keep the rest of the look.
+        /// </summary>
+        public bool ShowEmboss
+        {
+            get => _showEmboss;
+            set
+            {
+                if (_showEmboss == value)
+                    return;
+
+                _showEmboss = value;
+
+                _borderTop.BorderWidth = value ? 4 : 0;
+                _borderBottom.BorderWidth = value ? 3 : 0;
+
+                Dialog?.Refresh();
+            }
         }
 
         public ButtonControl(
@@ -227,67 +312,130 @@ namespace IS2Mod.ControlTypes
             // Let base calculate size normally
             PointD size = base.CalculateSize();
 
-            // Force all children to match button size exactly
-            if (_border != null && _textLabel != null)
+            // An auto sizing button has to be wide enough for its caption *and* its icon, or
+            // the icon eats into the text it was put next to.
+            // Room for the icon and the gap next to the caption the base already measured.
+            double extra = (HasIcon ? IconSize() : 0) + IconGap();
+
+            if (extra > 0)
             {
-                _border.SetLayoutSize(this.Size);
-                _textLabel.SetLayoutSize(this.Size);
-                _textLabel.IsAutoSize = false;
-                _borderTop.SetLayoutSize(this.Size);
-                _borderBottom.SetLayoutSize(this.Size);
-                _focusRing.SetLayoutSize(this.Size);
+                size = ClampToMaxSize(new PointD(size.X + extra, size.Y));
+                CalculatedSize = size;
+                SetLayoutSize(size);
             }
+
+            _textLabel.IsAutoSize = false;
+            LayoutParts();
+
             return size;
         }
 
         public override void NormalizeChildrenByDelta()
         {
-            if (_border != null && _textLabel != null)
-            {
-                // Force all sizes to match button size
-                _border.SetLayoutSize(this.Size);
-                _textLabel.SetLayoutSize(this.Size);
-                _borderTop.SetLayoutSize(this.Size);
-                _borderBottom.SetLayoutSize(this.Size);
-                _focusRing.SetLayoutSize(this.Size);
-
-                // Force all positions to match border position (overlay)
-                _border.Position = this.Position;
-                _textLabel.Position = _border.Position;
-                _borderTop.Position = _border.Position;
-                _borderBottom.Position = _border.Position;
-                _focusRing.Position = _border.Position;
-            }
+            LayoutParts();
             base.NormalizeChildrenByDelta();
         }
 
         public override void CalculateAllPositions()
         {
             base.CalculateAllPositions();
-
-            // Override all positions and sizes after layout
-            if (_border != null && _textLabel != null)
-            {
-                _border.SetLayoutSize(this.Size);
-                _border.Position = this.Position;
-
-                _textLabel.SetLayoutSize(this.Size);
-                _textLabel.Position = _border.Position;
-
-                _borderTop.SetLayoutSize(this.Size);
-                _borderTop.Position = _border.Position;
-
-                _borderBottom.SetLayoutSize(this.Size);
-                _borderBottom.Position = _border.Position;
-
-                _focusRing.SetLayoutSize(this.Size);
-                _focusRing.Position = _border.Position;
-            }
+            LayoutParts();
         }
 
+        /// <summary>
+        /// Puts the parts on top of each other at the button.s own size - the frame, the two
+        /// bevel overlays and the focus ring are all the same rectangle - and insets the caption
+        /// by whatever the icon takes, so the two cannot end up in the same place.
+        ///
+        /// One method rather than the same block repeated in three layout steps, which is how
+        /// the icon inset came to be missing from all of them.
+        /// </summary>
+        private void LayoutParts()
+        {
+            if (_border == null || _textLabel == null)
+                return;
+
+            _border.SetLayoutSize(Size);
+            _border.Position = Position;
+
+            _borderTop.SetLayoutSize(Size);
+            _borderTop.Position = Position;
+
+            _borderBottom.SetLayoutSize(Size);
+            _borderBottom.Position = Position;
+
+            _focusRing.SetLayoutSize(Size);
+            _focusRing.Position = Position;
+
+            // Icon and caption are laid out as one block and that block is centred.
+            //
+            // The label keeps the button's full width on purpose. Narrowing it to the text does
+            // not survive: CalculateAllPositions ends by normalizing, which stretches every
+            // child back to its parent's width - it overwrites the size and leaves the position
+            // alone. So the size is left to the normalizer and only the position is used, which
+            // is the one thing that holds.
+            //
+            // A label that centres its text in a box of the button's width therefore only needs
+            // shifting by half the icon block to make the two centred together.
+            double block = (HasIcon ? IconSize() : 0) + IconGap();
+            double textWidth = string.IsNullOrEmpty(Text) ? 0 : _textLabel.MeasureNaturalSize().X;
+
+            _textLabel.SetLayoutSize(Size);
+            _textLabel.Position = new PointD(Position.X + block / 2.0, Position.Y);
+
+            _iconLeft = Position.X + Math.Max(0, (Size.X - (block + textWidth)) / 2.0);
+        }
+
+        /// <summary>
+        /// The button and its parts, and then the icon on top of them.
+        ///
+        /// Drawn here rather than as a child control on purpose: the button forces every child
+        /// to its own size and position so the frame, the emboss and the label all sit exactly
+        /// on top of each other, and an icon is the one thing that must not.
+        /// </summary>
         public override void GenerateRenderData(ImageSurface surface, Context ctx)
         {
             base.GenerateRenderData(surface, ctx);
+
+            if (!HasIcon)
+                return;
+
+            ICoreClientAPI? api = Dialog?.Api;
+
+            if (api == null)
+                return;
+
+            double size = IconSize();
+
+            if (size <= 0)
+                return;
+
+            // Where LayoutParts put it - the left edge of the icon and caption block.
+            double x = _iconLeft;
+
+            double y = Position.Y + (Size.Y - size) / 2.0;
+
+            if (IconAsset != null)
+            {
+                _icon.Asset = IconAsset;
+                _icon.IconName = null;
+            }
+            else
+            {
+                _icon.IconName = IconName;
+                _icon.Asset = null;
+            }
+
+            _icon.Dialog = Dialog;
+            _icon.Position = new PointD(x, y);
+            _icon.SetLayoutSize(new PointD(size, size));
+            _icon.GenerateRenderData(surface, ctx);
         }
+
+        /// <summary>
+        /// Draws the icon. Not a child - see GenerateRenderData - but an ImageControl all the
+        /// same, so a named icon and an asset are loaded and cached in exactly one place.
+        /// </summary>
+        private readonly ImageControl _icon = new ImageControl();
     }
 }

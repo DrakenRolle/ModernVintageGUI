@@ -19,7 +19,7 @@ namespace IS2Mod.ControlTypes
     /// out of the item atlas with its own shader, so it is drawn per frame in
     /// <see cref="GenerateInteractiveRenderData"/>.
     /// </summary>
-    public class ItemSlotControl : UIControl
+    public class ItemSlotControl : UIControl, Interfaces.IItemTooltipSource
     {
         #region Vanilla styling
         /// <summary>GuiElementPassiveItemSlot.unscaledSlotSize.</summary>
@@ -76,6 +76,9 @@ namespace IS2Mod.ControlTypes
 
         /// <summary>Index of this slot inside its grid. Handed to the grid events.</summary>
         public int SlotIndex { get; set; }
+
+        /// <inheritdoc/>
+        public ItemSlot? TooltipSlot => Slot;
         #endregion
 
         /// <summary>
@@ -110,29 +113,9 @@ namespace IS2Mod.ControlTypes
             LostFocus += (sender, e) => SetHighlighted(false);
         }
 
-        /// <summary>
-        /// Tells the game which slot the cursor is on, the way GuiElementItemSlotGridBase does
-        /// from its OnMouseMove.
-        ///
-        /// It is not decoration: this is what the item info panel of the survival inventory is
-        /// drawn from, and what a mod listening on OnMouseEnterSlot reacts to. A grid that stays
-        /// silent here looks right and behaves like a picture of an inventory.
-        /// </summary>
         private void NotifyHover(bool entered)
         {
-            ICoreClientAPI? api = Dialog?.Api;
-
-            if (api == null || Slot == null)
-                return;
-
-            if (entered)
-            {
-                api.Input.TriggerOnMouseEnterSlot(Slot);
-            }
-            else
-            {
-                api.Input.TriggerOnMouseLeaveSlot(Slot);
-            }
+            ItemTooltip.Announce(Dialog?.Api, Slot, entered);
         }
 
         private void SetHighlighted(bool highlighted)

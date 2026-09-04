@@ -4,7 +4,7 @@ This is an approach to fix the current GUI system for Vintage Story.
 The core idea of this framework is a stack-container based way to structure and maintain a user
 interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for short.
 
-<img src="docs/images/readme-showcase.png" alt="A dialog showing every control: labels, buttons, a context menu opener, a scrolling list and an inventory grid" />
+<img src="docs/images/readme-showcase.png" alt="A dialog showing every control: labels, buttons, a context menu, dropdowns, an inventory grid, a checkbox, a text field, a progress bar, tabs and a colour picker" />
 
 *Every control in one dialog. This picture is rendered from the same code the test hotkey opens
 in game, so it cannot show a screen that no longer exists.*
@@ -54,32 +54,32 @@ in game, so it cannot show a screen that no longer exists.*
 * **Clipping and scrolling.** A container can cut what its children draw at its own edge, and any
   container can grow a vanilla styled scrollbar on either axis - the bars hang on the container
   rather than being controls of their own
+* **Real inventories.** An inventory grid is a view of an actual inventory the server knows about,
+  so items move between it and the player's bag, a chest or the creative inventory exactly as they
+  move between two vanilla grids - including the item tooltip and shift click
+* **Inventory events** that report what changed and what was there before, whoever changed it - a
+  click in the grid, a shift click from elsewhere, a hopper, another player, or the server
+* **Text input** with the keyboard layout applied, so umlauts, accents and dead keys work. The
+  game offers typed characters to nothing but its own dialogs, so this takes a Harmony patch of
+  its own
 * **Two drawing passes.** The control tree goes onto one Cairo surface, and anything that cannot -
   an item stack, drawn from the item atlas with its own shader - is drawn on top per frame, the
   same split the vanilla GUI makes
 
 **Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
-`TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`.
+`TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`, `DropdownControl`,
+`ItemTypeSelectorControl`, `CheckboxControl`, `TextInputControl`, `ProgressBarControl`,
+`TabsControl`, `ImageControl`, `ColorPickerControl`.
 
 <h2>What is still ongoing</h2>
 
-* Text input - `ClientMain.OnKeyPress`, the one carrying typed characters with the keyboard layout
-  applied, does not trigger anything on `IClientEventAPI`, so a text field needs a second Harmony
-  patch. Everything else about the keyboard works without one
 * `Orientation` (a control's own alignment) is inert, and `Orientation.Fill` is not implemented
 * Redraw invalidation - every hover state change currently recomposes the whole surface
 * Re-centering on window resize
 * XAML editor or custom UI designer
-* Cross compatibility with the vanilla UI (e.g. drag an item from a vanilla UI into a modern one)
 * More styling options (custom backgrounds, fonts)
-* New controls
-  * Imagebox, Checkbox, Dropdown, Tabs, Color picker
-  * Inventory grid (with auto scrollbar), Itemslot
-  * Loading bar / progress bar
-* Updates to existing controls
-  * Imagebutton (or an updated button with an image source)
-  * Panel and window should be auto-scrollbar capable (bool switch)
-  * Edge drag resize window
+* Text field extras - selecting a range, cut and paste, and a blinking caret
+* Edge drag resize window
 
 <h1>Getting started</h1>
 
@@ -96,8 +96,8 @@ Declare MVS_UI as a dependency in your `modinfo.json`:
 
 And add it as a Reference to your Mod Project.
 
-That is all - MVS_UI initialises itself. **Do not** apply the Harmony patch or create a `UIManager`
-in your own mod, and **do not** bundle a copy of the assembly; see
+That is all - MVS_UI initialises itself. **Do not** apply its Harmony patches or create a
+`UIManager` in your own mod, and **do not** bundle a copy of the assembly; see
 [why](https://github.com/DrakenRolle/ModernVintageGUI/wiki/Input-Focus-and-Rendering).
 
 <h2>A dialog</h2>
@@ -167,6 +167,15 @@ Hover and focus are separate states, so a control can be in both. Nothing is foc
 opens, which means Enter and Space stay with the game until the player tabs into the dialog or
 clicks a control.
 
+A text field takes every key while it is focused, so typing does not trigger the game's hotkeys -
+Escape still leaves, because a dialog you cannot escape from is a trap:
+
+```csharp
+var search = new TextInputControl { PlaceholderText = "Search..." };
+search.TextChanged  += (s, text) => Filter(text);
+search.EnterPressed += (s, text) => Submit(text);
+```
+
 <h2>Context menus</h2>
 
 A menu hangs on any control, positions itself at an anchor and supports cascades. One subscription
@@ -180,6 +189,111 @@ menu.ItemActivated += (sender, e) => capi.ShowChatMessage(string.Join(" > ", e.P
 ```
 
 <img src="docs/images/readme-context-menu-hover.png" alt="A context menu with an entry hovered" />
+
+<h2>Inventories</h2>
+
+An inventory grid shows a real inventory. Not a copy and not a client side stand-in: the server
+knows about it, so the player moves items in and out of it the same way they would with a chest,
+shift click and creative inventory included, and what they leave in it is still there next time.
+
+Create the inventory with a size and say where it belongs. That decides everything else:
+
+```csharp
+// A block: one inventory per block, saved with the chunk, drops when the block breaks
+public class BlockEntityMyCrate : ModInventoryBlockEntity
+{
+    public BlockEntityMyCrate() : base(size: 16, inventoryClassName: "mycrate") { }
+}
+
+grid.SetInventory(ModInventoryAccess.ForBlock(capi, pos, blockEntity.Inventory));
+```
+
+```csharp
+// Shared: any number of blocks or dialogs open the same one and see each other's changes
+sapi: inventorySystem.RegisterSharedInventory("guildbank", 32);
+capi: grid.SetInventory(ModInventoryAccess.ForShared(capi, "guildbank", 32));
+
+// Per player: a personal stash, saved with that player
+sapi: inventorySystem.RegisterPlayerInventory("loadout", 24);
+capi: grid.SetInventory(ModInventoryAccess.ForPlayer(capi, "loadout", 24));
+```
+
+One argument - the access carries the packets a slot move produces and opens and closes the
+inventory along with the dialog. Or let the grid bring its own:
+
+```csharp
+var grid = new InventoryGridControl(6, "loadout", internalInventory: true, slotCount: 24);
+var slot = InventoryGridControl.SingleSlot("output");   // the 1x1 case
+```
+
+The server still has to declare that one, because it decides what exists and how big it is:
+
+```csharp
+inventorySystem.RegisterPlayerInventory(
+    InventoryGridControl.InternalInventoryName("myDialog", "loadout"), 24);
+```
+
+Create the server half once, in `StartServerSide`:
+
+```csharp
+inventorySystem = new ModInventorySystem(sapi);
+```
+
+<h3>Knowing what changed</h3>
+
+```csharp
+grid.ItemPutIn    += (s, e) => Log($"{e.After.StackSize}x {e.After.GetName()} into slot {e.SlotId}");
+grid.ItemTakenOut += (s, e) => Log($"{e.Before.GetName()} left slot {e.SlotId}");
+grid.SlotChanged  += (s, e) => Log($"{e.Change}, {e.CountDelta:+#;-#;0}");
+```
+
+These fire for every change, not only for clicks in your grid: a shift click from the player's
+bag, a hopper, another player in a shared inventory and the server correcting the client all end
+up here. `Before` is a copy taken before the change, because by the time anyone hears about a move
+the old stack is gone. `InventoryWatcher` does the same for an inventory without a GUI, on either
+side.
+
+<h2>Dropdowns and item pickers</h2>
+
+```csharp
+var dropdown = new DropdownControl { PlaceholderText = "Pick a rock", MaxVisibleItems = 8 };
+
+dropdown.SetItems(new[] {
+    new DropdownItem("Granite", value: "granite"),
+    new DropdownItem(new ItemStack(flint), value: "flint"),   // icon and item tooltip
+});
+
+dropdown.SelectionChanged += (s, e) => capi.ShowChatMessage(e.Value?.ToString());
+```
+
+A list built from item stacks draws itself like the handbook's Blocks and Items page and brings
+the game's item tooltip with it. `MaxVisibleItems` and `MaxListHeight` decide when it starts
+scrolling - both unlimited by default, and the list is always cut down to what fits on screen.
+
+For picking an item *type* rather than holding an item there is a control that looks like a slot
+and opens the same list:
+
+```csharp
+selector.SetTypes(types);                                   // the list comes from you
+selector.SelectedItemType;                                  // ItemStack?
+selector.SelectedCode;                                      // AssetLocation?
+ItemTypeSelectorControl.CollectVariants(capi, code);        // every variant of one thing
+```
+
+<h2>Icons</h2>
+
+Any control that takes an `IconName` takes the game's icons and yours alike. Register an SVG once
+and use it by name:
+
+```csharp
+GuiIcons.Register(capi, "gear", new AssetLocation("mymod:textures/icons/gear.svg"));
+
+var button = new ButtonControl { Text = "Settings", IconName = "gear" };
+```
+
+`GuiIcons.Available(capi)` lists everything that will draw - the game's own, discovered from the
+running game rather than from a list written down here, plus anything registered. The showcase has
+a gallery of them under the "Icons" tab, because a name does not tell you what an icon looks like.
 
 <h2>Editing the UI after it was opened</h2>
 

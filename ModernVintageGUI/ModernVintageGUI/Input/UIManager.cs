@@ -53,8 +53,12 @@ namespace IS2Mod.Input
             {
                 foreach (CustomDialogElement dialog in _openDialogs)
                 {
-                    if (dialog.IsVisible && dialog.HoveredControl is ControlTypes.ItemSlotControl)
+                    if (dialog.IsVisible &&
+                        dialog.HoveredControl is Interfaces.IItemTooltipSource source &&
+                        source.TooltipSlot?.Itemstack != null)
+                    {
                         return true;
+                    }
                 }
 
                 return false;
@@ -432,6 +436,33 @@ namespace IS2Mod.Input
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// A typed character, handed over by
+        /// <see cref="IS2Mod.Patches.ClientMainKeyPressPatch"/> before the game sees it.
+        ///
+        /// Characters are the one input the event API does not carry, so this is the only way in
+        /// - and the patch has to know whether we took it, because a character we consumed must
+        /// not also land in the chat box.
+        /// </summary>
+        /// <returns>true when one of our controls took it.</returns>
+        public bool HandleKeyPress(KeyEvent e)
+        {
+            CustomDialogElement? target = KeyboardTarget();
+
+            if (target == null)
+                return false;
+
+            var args = new ControlTypes.Events.KeyEventArgs(e);
+            target.HandleKeyPress(args);
+
+            if (args.Handled)
+            {
+                e.Handled = true;
+            }
+
+            return args.Handled;
         }
 
         private void OnKeyDown(KeyEvent e)

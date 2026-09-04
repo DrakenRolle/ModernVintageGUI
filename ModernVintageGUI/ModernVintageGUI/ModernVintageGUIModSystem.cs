@@ -26,14 +26,17 @@ namespace ModernVintageGUI
         /// number the inventory does not have.
         /// </summary>
         private const string ShowcaseInventoryClass = "mvguishowcase";
+
+        /// <summary>The dialog name, which is half of the id of any inventory a control in it builds.</summary>
+        private const string ShowcaseDialogName = "mvguiShowcase";
         private const int ShowcaseInventorySlots = 48;
 
         private ICoreClientAPI? clientApi;
         private Harmony? harmony;
         private UIManager? uiManager;
         private CustomDialogElement? dialog;
-        private DialogInventory? showcaseInventory;
-        private DialogInventoryServer? serverInventories;
+        private ModInventoryAccess? showcaseInventory;
+        private ModInventorySystem? inventorySystem;
 
         // Called on server and client
         // Useful for registering block/entity classes on both sides
@@ -50,8 +53,16 @@ namespace ModernVintageGUI
             // be a drawing: the server resolves every slot move by inventory id through the
             // player's inventory manager, and an inventory it has never heard of is not there to
             // be found, so the move is dropped and the client corrected back.
-            serverInventories = new DialogInventoryServer(api);
-            serverInventories.Register(ShowcaseInventoryClass, ShowcaseInventorySlots);
+            inventorySystem = new ModInventorySystem(api);
+            inventorySystem.RegisterPlayerInventory(ShowcaseInventoryClass, ShowcaseInventorySlots);
+
+            // The single slot in the showcase builds its own inventory from a bool in its
+            // constructor, but the server still decides that it exists and how big it is - a
+            // client that could name a size could ask for any size it liked. The name is the one
+            // the grid derives from the dialog and the control.
+            inventorySystem.RegisterPlayerInventory(
+                InventoryGridControl.InternalInventoryName(ShowcaseDialogName, Samples.ControlShowcase.SingleSlotName),
+                1);
         }
 
         public override void StartClientSide(ICoreClientAPI api)
@@ -68,7 +79,7 @@ namespace ModernVintageGUI
 
             // This client's copy of the showcase inventory. The contents come from the server
             // when it is opened - nothing here invents them.
-            showcaseInventory = new DialogInventory(api, ShowcaseInventoryClass, ShowcaseInventorySlots);
+            showcaseInventory = ModInventoryAccess.ForPlayer(api, ShowcaseInventoryClass, ShowcaseInventorySlots);
 
             api.Input.RegisterHotKey(TestDialogHotkey, "Toggle ModernVintageGUI test dialog", GlKeys.J, HotkeyType.GUIOrOtherControls);
             api.Input.SetHotKeyHandler(TestDialogHotkey, OnDialogHotkey);
@@ -91,22 +102,13 @@ namespace ModernVintageGUI
             return true; // true = event was handled
         }
 
-        private static CustomDialogElement BuildTestDialog(ICoreClientAPI capi, DialogInventory? inventory)
+        private static CustomDialogElement BuildTestDialog(ICoreClientAPI capi, ModInventoryAccess? inventory)
         {
-            var showcase = new CustomDialogElement(capi, "mvguiShowcase", "Control showcase");
+            var showcase = new CustomDialogElement(capi, ShowcaseDialogName, "Control showcase");
 
             // The same builder the documentation images are rendered from, so what the hotkey
             // opens and what the README shows cannot drift apart.
             Samples.ControlShowcase.Build(showcase, capi, withTitleBar: true, gridInventory: inventory);
-
-            if (inventory != null)
-            {
-                // Opening the inventory is tied to the dialog rather than to the hotkey, so that
-                // closing it any other way - Escape, or from code - closes the inventory too.
-                // A left open inventory would keep accepting moves into a grid nobody can see.
-                showcase.Shown += (sender, e) => inventory.Open();
-                showcase.Hidden += (sender, e) => inventory.Close();
-            }
 
             return showcase;
         }

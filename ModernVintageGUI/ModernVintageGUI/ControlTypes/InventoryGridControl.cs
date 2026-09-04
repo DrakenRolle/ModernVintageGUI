@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+using ModernVintageGUI.Inventory;
 using Vintagestory.API.Config;
 
 namespace IS2Mod.ControlTypes
@@ -41,7 +42,7 @@ namespace IS2Mod.ControlTypes
     /// the stack being carried is the one the whole game carries - so items move between this
     /// grid and the player's bag, a chest or the creative inventory exactly as they move between
     /// any two vanilla grids. For an inventory of the mod's own,
-    /// <see cref="ModernVintageGUI.Inventory.DialogInventory"/> builds one that the server knows
+    /// <see cref="ModernVintageGUI.Inventory.ModInventoryAccess"/> builds one that the server knows
     /// about, which is what the server needs before it will accept a single move.
     ///
     /// It is a <see cref="RectangleControl"/> rather than something built from scratch, which
@@ -88,6 +89,23 @@ namespace IS2Mod.ControlTypes
 
         /// <summary>Raised when the cursor enters a slot. Useful for a tooltip.</summary>
         public event EventHandler<ItemSlotEventArgs>? SlotEnter;
+
+        /// <summary>
+        /// Raised when the contents of a slot change, whoever changed them - a click in this
+        /// grid, a shift click from the player's bag, a hopper, another player in a shared
+        /// inventory, or the server correcting this client.
+        ///
+        /// This is the one to listen on for "what is in there now". <see cref="SlotClicked"/> is
+        /// not: it reports a click in this grid and nothing else, so it misses every change that
+        /// came from somewhere else.
+        /// </summary>
+        public event EventHandler<InventorySlotChangedEventArgs>? SlotChanged;
+
+        /// <summary>Something arrived in a slot. See <see cref="InventoryWatcher.ItemPutIn"/>.</summary>
+        public event EventHandler<InventorySlotChangedEventArgs>? ItemPutIn;
+
+        /// <summary>Something left a slot. See <see cref="InventoryWatcher.ItemTakenOut"/>.</summary>
+        public event EventHandler<InventorySlotChangedEventArgs>? ItemTakenOut;
         #endregion
 
         private readonly List<ItemSlotControl> _slots = new List<ItemSlotControl>();
@@ -113,15 +131,46 @@ namespace IS2Mod.ControlTypes
         /// <summary>That inset in device pixels.</summary>
         private double Inset => UnscaledInset * LayoutScale;
 
-        public InventoryGridControl(int columns = 1, string _Name = "")
+        /// <param name="internalInventory">
+        /// Give the grid an inventory of its own instead of being handed one. The server keeps
+        /// it per player and saves it with them, and it is reachable through
+        /// <see cref="Inventory"/> from the moment the dialog is first shown - which is when it
+        /// can be built, because that is when the client API is reachable.
+        ///
+        /// It is a real inventory like any other, not a client side stand-in: the player can
+        /// move items in and out of it, and what they leave in it is still there next time.
+        /// </param>
+        /// <param name="slotCount">How many slots that inventory has. Ignored without it.</param>
+        public InventoryGridControl(
+            int columns = 1,
+            string _Name = "",
+            bool internalInventory = false,
+            int slotCount = 1)
             : base(_Name: _Name, _Margin: 0, _Padding: 0)
         {
             _columns = Math.Max(1, columns);
+            _wantsInternalInventory = internalInventory;
+            _internalSlotCount = Math.Max(1, slotCount);
 
             // The grid is a container of slots and nothing else. InsideOrientation is not used -
             // placement is the lattice below - but None keeps the base measure pass from
             // stacking the slots on top of each other into a single slot sized box.
             InsideOrientation = Orientation.None;
+
+            if (_wantsInternalInventory)
+            {
+                // Something to look at before the dialog is shown and the real one arrives.
+                SetSlotCount(_internalSlotCount);
+            }
+        }
+
+        /// <summary>
+        /// A single slot the player can put one thing into, backed by an inventory of its own.
+        /// The 1x1 case of the grid, named so a caller does not have to spell it out.
+        /// </summary>
+        public static InventoryGridControl SingleSlot(string name = "")
+        {
+            return new InventoryGridControl(columns: 1, _Name: name, internalInventory: true, slotCount: 1);
         }
 
         #region Building
@@ -172,6 +221,44 @@ namespace IS2Mod.ControlTypes
         /// CanPlayerAccess &amp;&amp; HasOpened, so an inventory the player has not opened
         /// refuses every move, on the client and on the server alike.
         /// </param>
+        /// <summary>
+        /// The simple way in: an inventory of the mod's own, with everything it needs to work
+        /// already attached.
+        ///
+        /// <code>
+        /// grid.SetInventory(ModInventoryAccess.ForShared(capi, "guildbank", 32));
+        /// grid.SetInventory(ModInventoryAccess.ForBlock(capi, pos, blockEntity.Inventory));
+        /// </code>
+        ///
+        /// The packets a slot move produces and the opening and closing along with the dialog
+        /// are taken from the access - which is the difference to the overload below, where the
+        /// caller has to supply both and gets a grid that silently refuses every move if it does
+        /// not.
+        /// </summary>
+        public void SetInventory(ModInventoryAccess access)
+        {
+            if (access == null)
+                throw new ArgumentNullException(nameof(access));
+
+            IInventory? inventory = access.Inventory;
+
+            if (inventory == null)
+                throw new InvalidOperationException(
+                    "The inventory is not available yet - there is no player. Build the dialog " +
+                    "when the game is running, not while the mod is starting.");
+
+            _access = access;
+
+            SetInventory(
+                inventory,
+                access.Capi,
+                sendPacket: access.SendPacket,
+
+                // The access opens it, on both sides. A grid cannot: the server has to be told
+                // about an inventory before it will accept a single move for it.
+                announceOpen: false);
+        }
+
         public void SetInventory(
             IInventory inventory,
             ICoreClientAPI capi,
@@ -185,6 +272,8 @@ namespace IS2Mod.ControlTypes
             _inventory = inventory;
             _sendPacket = sendPacket;
             _announceOpen = announceOpen;
+
+            WatchInventory(inventory);
 
             SetSlotCount(0);
 
@@ -204,6 +293,20 @@ namespace IS2Mod.ControlTypes
         private bool _weOpenedInventory;
         private bool _warnedNotOpened;
 
+        private ModInventoryAccess? _access;
+        private InventoryWatcher? _watcher;
+        private readonly bool _wantsInternalInventory;
+        private readonly int _internalSlotCount;
+
+        /// <summary>
+        /// The inventory the grid is showing - the one it was given, or the one it made for
+        /// itself when it was built with <c>internalInventory: true</c>.
+        ///
+        /// Null until the dialog has been shown once in the internal case: the inventory needs
+        /// the client API, and that is only reachable through a dialog.
+        /// </summary>
+        public IInventory? Inventory => _inventory;
+
         /// <summary>
         /// Announces the inventory as opened, unless somebody else already has it open.
         ///
@@ -216,6 +319,12 @@ namespace IS2Mod.ControlTypes
         public override void OnDialogShown()
         {
             base.OnDialogShown();
+
+            EnsureInternalInventory();
+
+            // An inventory of the mod's own opens itself on both sides - which is the part a
+            // grid cannot do, because the server has to be told about it first.
+            _access?.Open();
 
             if (_inventory == null || _capi == null || !_announceOpen || _weOpenedInventory)
                 return;
@@ -236,11 +345,63 @@ namespace IS2Mod.ControlTypes
         {
             base.OnDialogHidden();
 
+            _access?.Close();
+
             if (_inventory == null || _capi == null || !_weOpenedInventory)
                 return;
 
             SendToServer(_inventory.Close(_capi.World.Player));
             _weOpenedInventory = false;
+        }
+
+        /// <summary>
+        /// Builds the grid's own inventory, the first time the dialog is shown.
+        ///
+        /// Not in the constructor, because an inventory needs the client API and that is only
+        /// reachable through a dialog. The name it is stored under is built from the dialog and
+        /// the control, so it is the same one every session - otherwise what the player left in
+        /// it would be in a different inventory next time.
+        /// </summary>
+        private void EnsureInternalInventory()
+        {
+            if (!_wantsInternalInventory || _access != null)
+                return;
+
+            ICoreClientAPI? capi = Dialog?.Api;
+
+            if (capi == null)
+                return;
+
+            SetInventory(ModInventoryAccess.ForPlayer(
+                capi,
+                InternalInventoryName(Dialog?.DialogName, Name),
+                _internalSlotCount));
+        }
+
+        /// <summary>
+        /// The name the grid's own inventory is stored under, built from the dialog and the
+        /// control so it is the same one every session.
+        ///
+        /// It is public because the server has to declare that inventory before it will accept a
+        /// move into it, and the server has no grid to ask:
+        ///
+        /// <code>
+        /// // client
+        /// var grid = new InventoryGridControl(6, "loadout", internalInventory: true, slotCount: 24);
+        /// // server
+        /// system.RegisterPlayerInventory(
+        ///     InventoryGridControl.InternalInventoryName("myDialog", "loadout"), 24);
+        /// </code>
+        ///
+        /// That second line is the price of the inventory being real rather than a client side
+        /// stand-in - the server decides what exists and how big it is, or a client could ask
+        /// for anything it liked.
+        /// </summary>
+        public static string InternalInventoryName(string? dialogName, string? controlName)
+        {
+            return (string.IsNullOrEmpty(dialogName) ? "dialog" : dialogName)
+                 + "_"
+                 + (string.IsNullOrEmpty(controlName) ? "grid" : controlName);
         }
 
         /// <summary>
@@ -380,6 +541,29 @@ namespace IS2Mod.ControlTypes
             _sendPacket(packets);
         }
         #endregion
+
+        /// <summary>
+        /// Starts reporting what changes in the inventory, and stops reporting the previous one.
+        ///
+        /// The redraw is the reason this exists even for a grid nobody subscribed to: a stack
+        /// that arrives from anywhere but a click in this grid - a shift click, a hopper, the
+        /// server - changes nothing this control knows about, so without being told the grid
+        /// would keep drawing what was there before until something else made it redraw.
+        /// </summary>
+        private void WatchInventory(IInventory inventory)
+        {
+            _watcher?.Dispose();
+            _watcher = new InventoryWatcher(inventory);
+
+            _watcher.SlotChanged += (sender, e) =>
+            {
+                Dialog?.Refresh();
+                SlotChanged?.Invoke(this, e);
+            };
+
+            _watcher.ItemPutIn += (sender, e) => ItemPutIn?.Invoke(this, e);
+            _watcher.ItemTakenOut += (sender, e) => ItemTakenOut?.Invoke(this, e);
+        }
 
         private void AddSlot(ItemSlot? slot)
         {

@@ -76,6 +76,17 @@ namespace IS2Mod.ControlTypes
         public event EventHandler<Events.KeyEventArgs>? KeyDown;
         public event EventHandler<Events.KeyEventArgs>? KeyUp;
 
+        /// <summary>
+        /// A typed character, with the keyboard layout applied - umlauts, accents, dead keys.
+        /// This is what a text field listens on; <see cref="KeyDown"/> carries a raw key code
+        /// and cannot tell an "a" from an "A" or produce an "ä" at all.
+        ///
+        /// It only arrives because <see cref="IS2Mod.Patches.ClientMainKeyPressPatch"/> puts it
+        /// there: ClientMain.OnKeyPress, the one the game gets its characters from, triggers
+        /// nothing on IClientEventAPI.
+        /// </summary>
+        public event EventHandler<Events.KeyEventArgs>? KeyPress;
+
         /// <summary>Raised when this control became the keyboard focus of its dialog.</summary>
         public event EventHandler? GotFocus;
 
@@ -95,6 +106,11 @@ namespace IS2Mod.ControlTypes
         public void InvokeEventKeyUp(Events.KeyEventArgs args)
         {
             KeyUp?.Invoke(this, args);
+        }
+
+        public void InvokeEventKeyPress(Events.KeyEventArgs args)
+        {
+            KeyPress?.Invoke(this, args);
         }
 
         /// <summary>

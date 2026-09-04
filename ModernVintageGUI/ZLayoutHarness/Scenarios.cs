@@ -63,6 +63,33 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "dropdown-closed",
+                Description = "Three dropdowns: one with a selection, one showing its placeholder, "
+                            + "and one given a fixed size. The box and its arrow button are the "
+                            + "ones GuiElementDropDown draws.",
+                Build = BuildDropdownClosed
+            };
+
+            yield return new Scenario
+            {
+                Name = "dropdown-open",
+                Description = "The list a dropdown puts into its popup, with the second entry "
+                            + "selected and the cursor on the third - selection and hover are "
+                            + "separate states and have to be distinguishable.",
+                Build = BuildDropdownOpen
+            };
+
+            yield return new Scenario
+            {
+                Name = "dropdown-item-rows",
+                Description = "The same list in the item row style: the measurements of the "
+                            + "survival handbook's Blocks and Items list. The icon column is "
+                            + "empty here because rendering a stack needs the game's item atlas.",
+                Build = BuildDropdownItemRows
+            };
+
+            yield return new Scenario
+            {
                 Name = "keyboard-focus",
                 Description = "Three buttons, the middle one holding the keyboard focus and the "
                             + "last one both focused and hovered - the ring and the hover look "
@@ -255,6 +282,104 @@ namespace LayoutHarness
             }
 
             root.Children.Add(stack);
+            return root;
+        }
+
+        /// <summary>
+        /// The closed boxes. A dropdown without a dialog cannot open its popup - that needs a
+        /// client API - but the box draws itself, which is the half this picture is about.
+        /// </summary>
+        private static RectangleControl BuildDropdownClosed()
+        {
+            RectangleControl root = CreateRoot();
+
+            var withSelection = new DropdownControl(_Name: "picked");
+            withSelection.SetItems(new[]
+            {
+                new DropdownItem("Granite"),
+                new DropdownItem("Andesite"),
+                new DropdownItem("Chalk")
+            });
+            withSelection.Select(1);
+            root.Children.Add(withSelection);
+
+            var empty = new DropdownControl(_Name: "placeholder")
+            {
+                PlaceholderText = "Pick a rock"
+            };
+            empty.SetItems(new[] { new DropdownItem("Granite") });
+            empty.Select(-1);
+            root.Children.Add(empty);
+
+            var fixedSize = new DropdownControl(_Name: "fixed")
+            {
+                Size = new PointD(220, 30),
+                IsAutoSize = false
+            };
+            fixedSize.SetItems(new[] { new DropdownItem("Fixed 220 x 30") });
+            fixedSize.Select(0);
+            root.Children.Add(fixedSize);
+
+            return root;
+        }
+
+        /// <summary>
+        /// The open list, built the way DropdownControl builds it - the same background helper
+        /// and the same entries, so the picture cannot drift from what the popup shows.
+        /// </summary>
+        private static RectangleControl BuildDropdownOpen()
+        {
+            RectangleControl root = CreateRoot();
+
+            var entries = new[]
+            {
+                new DropdownItem("Granite"),
+                new DropdownItem("Andesite"),
+                new DropdownItem("Chalk"),
+                new DropdownItem("Basalt")
+            };
+
+            foreach (DropdownItem entry in entries)
+            {
+                entry.Name = entry.Text;
+            }
+
+            // The very box DropdownControl puts into its popup, with the second entry selected.
+            root.Children.Add(DropdownControl.CreateListBox("dropdownList", entries, selectedIndex: 1));
+
+            // The hover goes through the real Enter handler rather than through a colour set by
+            // hand, so this shows what the game would draw.
+            entries[2].InvokeEventEnter(new MouseEvent(0, 0));
+
+            return root;
+        }
+
+        /// <summary>
+        /// The handbook row style, forced - without a client there are no stacks, and Auto would
+        /// take a list of captions for a menu.
+        /// </summary>
+        private static RectangleControl BuildDropdownItemRows()
+        {
+            RectangleControl root = CreateRoot();
+
+            var entries = new[]
+            {
+                new DropdownItem("Jam"),
+                new DropdownItem("Meat Stew"),
+                new DropdownItem("Porridge"),
+                new DropdownItem("Scrambled Eggs")
+            };
+
+            foreach (DropdownItem entry in entries)
+            {
+                entry.Name = entry.Text;
+            }
+
+            root.Children.Add(DropdownControl.CreateListBox(
+                "itemRows", entries, selectedIndex: -1, style: DropdownRowStyle.ItemList));
+
+            entries[1].InvokeEventEnter(new MouseEvent(0, 0));
+
             return root;
         }
 
