@@ -1,0 +1,136 @@
+@* The properties of the selected control. Every editor writes one attribute; clearing an
+   editor removes the attribute, which is how a property goes back to its default rather than
+   being pinned to a value that only happens to equal it today. *@
+
+@if (Element == null)
+{
+    <div class="empty">Nothing selected. Click a control on the canvas or in the outline.</div>
+}
+else if (Element.Name.LocalName == ControlCatalog.TabTag)
+{
+    <div class="prop-group">Tab</div>
+    <div class="prop">
+        <label class="@(Element.Attribute("Caption") != null ? "set" : "")">Caption</label>
+        <input type="text"
+               value="@((string?)Element.Attribute("Caption"))"
+               @onchange="e => WriteText(CaptionName, e)" />
+    </div>
+}
+else if (Descriptor == null)
+{
+    <div class="empty">
+        &lt;@Element.Name.LocalName&gt; is not a control this framework knows about.
+    </div>
+}
+else
+{
+    @foreach (var group in Descriptor.Properties.GroupBy(p => p.Group))
+    {
+        <div class="prop-group">@(group.Key == "Layout" ? "Layout" : Descriptor.Tag)</div>
+
+        @foreach (MarkupProperty property in group)
+        {
+            string? written = (string?)Element.Attribute(property.Name);
+            string fallback = ValueConverters.Format(property.DefaultValue);
+            string current = written ?? fallback;
+
+            <div class="prop">
+                <label class="@(written != null ? "set" : "")"
+                       title="@property.Name (@property.Type.Name), default @(fallback.Length == 0 ? "empty" : fallback)">
+                    @property.Name
+                </label>
+
+                @if (property.Type == typeof(bool))
+                {
+                    <input type="checkbox"
+                           checked="@(current == TrueText)"
+                           @onchange="e => WriteFlag(property.Name, e)" />
+                }
+                else if (property.Type.IsEnum)
+                {
+                    <select value="@current" @onchange="e => WriteText(property.Name, e)">
+                        @foreach (string option in property.EnumNames)
+                        {
+                            <option value="@option">@option</option>
+                        }
+                    </select>
+                }
+                else if (property.Type == typeof(IS2Mod.ControlTypes.ElementColor))
+                {
+                    <span class="colour">
+                        <input type="color"
+                               value="@HexOf(current)"
+                               @onchange="e => WriteColour(property.Name, e, current)" />
+                        <input type="text"
+                               value="@written"
+                               placeholder="@fallback"
+                               @onchange="e => WriteText(property.Name, e)" />
+                    </span>
+                }
+                else if (property.Type == typeof(int) || property.Type == typeof(double) || property.Type == typeof(float))
+                {
+                    <input type="number" step="any"
+                           value="@written"
+                           placeholder="@fallback"
+                           @onchange="e => WriteText(property.Name, e)" />
+                }
+                else
+                {
+                    <input type="text"
+                           value="@written"
+                           placeholder="@fallback"
+                           @onchange="e => WriteText(property.Name, e)" />
+                }
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public XElement? Element { get; set; }
+    [Parameter] public ControlDescriptor? Descriptor { get; set; }
+
+    /// <summary>Name and new value of the attribute to write. A null value removes it.</summary>
+    [Parameter] public EventCallback<(string Name, string? Value)> OnChange { get; set; }
+
+    // Razor cannot take a nested string literal inside an attribute's lambda, so the literals
+    // the editors need live here rather than in the markup above.
+    private const string CaptionName = "Caption";
+    private const string TrueText = "true";
+    private const string FalseText = "false";
+
+    private Task Write(string name, string? value) => OnChange.InvokeAsync((name, value));
+
+    private Task WriteText(string name, ChangeEventArgs args) =>
+        Write(name, args.Value?.ToString());
+
+    private Task WriteFlag(string name, ChangeEventArgs args) =>
+        Write(name, args.Value is true ? TrueText : FalseText);
+
+    /// <summary>
+    /// The colour input only understands #rrggbb, so the alpha of the current value is kept and
+    /// only the three colour bytes are taken from it.
+    /// </summary>
+    private Task WriteColour(string name, ChangeEventArgs args, string current)
+    {
+        string? picked = args.Value?.ToString();
+
+        if (string.IsNullOrEmpty(picked))
+            return Task.CompletedTask;
+
+        string alpha = "ff";
+        if (ValueConverters.TryParseColor(current, out var existing) && existing != null)
+        {
+            alpha = existing.A.ToString("x2");
+        }
+
+        return Write(name, picked + alpha);
+    }
+
+    private static string HexOf(string value)
+    {
+        return ValueConverters.TryParseColor(value, out var colour) && colour != null
+            ? $"#{colour.R:x2}{colour.G:x2}{colour.B:x2}"
+            : "#000000";
+    }
+}

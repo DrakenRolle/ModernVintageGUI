@@ -1,0 +1,17 @@
+<!-- A tab strip over a page host. Pick a tab in the outline to design that page. -->
+<Dialog Name="root" InsideOrientation="Top" Padding="10" BackgroundColor="#33291fff">
+  <Tabs Name="tabs">
+    <Tab Caption="Input">
+      <Rectangle Name="inputPage" InsideOrientation="Top" Padding="8" Size="260,120" BorderColor="#7f6a4cff">
+        <TextInput Name="field" PlaceholderText="Type here" />
+        <Checkbox Name="remember" Text="Remember this" />
+      </Rectangle>
+    </Tab>
+    <Tab Caption="Output">
+      <Rectangle Name="outputPage" InsideOrientation="Top" Padding="8" Size="260,120" BorderColor="#7f6a4cff">
+        <Label Name="result" Text="Nothing yet" TextColor="#e8e2d6ff" />
+        <ProgressBar Name="bar" Value="30" />
+      </Rectangle>
+    </Tab>
+  </Tabs>
+</Dialog>

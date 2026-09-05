@@ -1,0 +1,12 @@
+<!-- A vanilla style dialog: full bleed title bar on top, padded content below it. -->
+<Dialog Name="root" InsideOrientation="Top" Padding="0" BackgroundColor="#33291fff">
+  <TitleBar Name="titleBar" Title="My Dialog" />
+  <Rectangle Name="content" InsideOrientation="Top" Padding="10" BorderColor="#00000000">
+    <Label Name="heading" Text="What this dialog is for" FontSize="18" TextColor="#e8e2d6ff" />
+    <TextInput Name="search" PlaceholderText="Search" />
+    <Rectangle Name="buttonRow" InsideOrientation="Left" Padding="0" BorderColor="#00000000">
+      <Button Name="save" Text="Save" />
+      <Button Name="cancel" Text="Cancel" />
+    </Rectangle>
+  </Rectangle>
+</Dialog>

@@ -21,9 +21,10 @@ in game, so it cannot show a screen that no longer exists.*
   * Control focused approach like in other .NET UI frameworks - WinForms, WPF, UWP and so on
 * Dialog scaling and control positioning should work independently of GUI scale or window size
 * <b>UI DESIGNER :D</b>
-  * Not final, but the idea was to use the WPF designer with custom controls, so you can build
-    Vintage Story user interfaces in XAML with a real visual designer
-* Either JSON or XML exportable format
+  * There is one - `ZUIDesigner`, in the browser. Drag controls into the dialog, see it drawn by
+    the framework's own code, and get the markup or the C# back out. The WPF idea turned into a
+    Blazor one for the same reason the harness exists: it can run the real layout without the game
+* XML exportable format - and the designer edits that XML rather than a model of its own
 * Easy to implement custom controls
 * Long term sustainability by decoupling this system from the vanilla one as far as possible, so
   game updates do not break all the user interfaces
@@ -50,6 +51,8 @@ in game, so it cannot show a screen that no longer exists.*
   uploaded once per refresh; the vanilla GUI system is only used where it actually helps
 * **A headless layout harness** that renders the UI to PNG and checks the layout invariants without
   starting the game
+* **A visual designer in the browser**, built on that same headless rendering. Drag controls into
+  the dialog, drop them into the container and the row you can see, and get XML markup or C# back
 
 * **Clipping and scrolling.** A container can cut what its children draw at its own edge, and any
   container can grow a vanilla styled scrollbar on either axis - the bars hang on the container
@@ -458,6 +461,53 @@ It reports a layout pass and a redraw of the showcase tree separately, each spli
 into *self* time and *total* time - a container with a large total and a small self is not slow,
 the fifty rows in it are. It also prints the same dialog at GUI scale 2, because the drawing scales
 with the *area* of the dialog rather than with the number of controls.
+
+<h1>UI designer</h1>
+
+`ZUIDesigner` is the harness with a face on it: the same headless layout and drawing, served to a
+browser as a PNG, with a toolbox on one side and the document on the other.
+
+```
+dotnet run --project ModernVintageGUI/ZUIDesigner
+```
+
+Then <http://localhost:5199>. `VINTAGE_STORY` has to be set, same as for the harness.
+
+It is **markup first**. The document is XML and the XML is what everything edits - dropping a
+control, dragging one somewhere else, typing in the property grid and typing in the markup pane are
+all the same operation, so the text pane and the canvas cannot disagree:
+
+```xml
+<Dialog Name="root" InsideOrientation="Top" Padding="0" BackgroundColor="#33291fff">
+  <TitleBar Name="titleBar" Title="My Dialog" />
+  <Rectangle Name="content" InsideOrientation="Top" Padding="10">
+    <Label Name="heading" Text="What this dialog is for" FontSize="18" />
+    <Rectangle Name="buttonRow" InsideOrientation="Left" Padding="0">
+      <Button Name="save" Text="Save" />
+      <Button Name="cancel" Text="Cancel" />
+    </Rectangle>
+  </Rectangle>
+</Dialog>
+```
+
+Dragging shows the container that would take the control and a caret for where in it the control
+would land - a line between rows where the container stacks downwards, between columns where it
+stacks sideways. The deepest container under the cursor wins, so dropping onto a button inside a
+row puts the control into that row beside it. The outline on the right takes drops too, with a row
+lighting up for *into this container* and a line at its edge for *beside it*.
+
+Containers grow with what you put in them, because a dropped container is not given a size - one
+that cannot grow clips the children that no longer fit, and the designer names any container that
+is in that state rather than leaving you to wonder where a control went. A `<TitleBar>` is placed
+for you: first inside the root, with the root's padding handed to the content under the bar, which
+is the only arrangement in which a title bar reaches both edges of the window.
+
+The toolbox and the property grid are built by reflecting over the control assembly, so a control
+you add turns up in the designer with its properties on the next build. **Copy C#** hands back the
+code that builds the same tree, which is how a design gets into a mod today.
+
+Details, the attribute types and what a headless picture cannot show are in
+[ModernVintageGUI/ZUIDesigner/README.md](ModernVintageGUI/ZUIDesigner/README.md).
 
 In the game, where the GPU upload and the per frame item pass also exist:
 
