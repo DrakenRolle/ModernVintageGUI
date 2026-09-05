@@ -43,9 +43,44 @@ namespace ModernVintageGUI.ControlTypes
         /// the pickaxe it happens to be selling.
         /// </summary>
         public bool DescribeItemsAutomatically { get; set; } = true;
+
+        /// <summary>
+        /// Put every variant of the picked thing into its details, as a list of its own.
+        ///
+        /// This is what a list of *kinds* wants. One row says "rock", and what the player is
+        /// actually after is which rock - so opening the row opens the granite, the andesite and
+        /// the chalk, each with the game's own icon and tooltip, in the same kind of list they
+        /// came from. It is the same control nested one level deep, which is also why it stops
+        /// there: the nested list has this switched off, so a variant opens its description and
+        /// not a third list.
+        ///
+        /// On by default. Off for a list that already holds the variants themselves, where every
+        /// row would open a copy of its own siblings.
+        /// </summary>
+        public bool ShowVariants { get; set; } = true;
+
+        /// <summary>How tall the nested variant list is, in author units.</summary>
+        public double UnscaledVariantListHeight { get; set; } = 150.0;
+
+        /// <summary>The caption over the nested list. Null leaves it off.</summary>
+        public string? VariantsHeading { get; set; } = "Variants";
+
+        /// <summary>
+        /// Raised when a row of the nested variant list is picked. The outer list's own
+        /// <see cref="ListViewControl.SelectionChanged"/> stays on the kind that was opened, so
+        /// a caller can tell "they are looking at rock" from "they picked granite".
+        /// </summary>
+        public event EventHandler<ListViewSelectionEventArgs>? VariantSelected;
         #endregion
 
         private readonly List<ItemStack> _stacks = new List<ItemStack>();
+
+        /// <summary>
+        /// The nested list, built once and refilled per row rather than made again per click -
+        /// it is a control with a subtree, and the panel it sits in is rebuilt on every click.
+        /// </summary>
+        private ItemListViewControl? _variantList;
+        private RectangleControl? _variantPanel;
 
         public ItemListViewControl(string _Name = "", double _Margin = 5)
             : base(_Name, _Margin)
@@ -134,9 +169,13 @@ namespace ModernVintageGUI.ControlTypes
         {
             ItemStack? stack = item.Stack;
 
+            // What the caller put on the row always wins over anything worked out here, so a
+            // row that already carries its own content keeps it.
+            UIControl? content = item.DetailContent ?? BuildVariantList(stack);
+
             if (stack == null || !DescribeItemsAutomatically)
             {
-                base.FillDetails(view, item);
+                view.Show(item.Text, item.Description, item.Details, stack, item.IconName, content);
                 return;
             }
 
@@ -149,7 +188,85 @@ namespace ModernVintageGUI.ControlTypes
                 entries.AddRange(FactsAbout(stack));
             }
 
-            view.Show(item.Text, description, entries, stack, item.IconName);
+            view.Show(item.Text, description, entries, stack, item.IconName, content);
+        }
+
+        /// <summary>
+        /// The nested list of every variant of <paramref name="stack"/>, or null when there is
+        /// nothing to nest.
+        ///
+        /// Null rather than an empty list in three cases, and each of them is a case where a
+        /// frame with nothing in it would be worse than no frame: variants are switched off,
+        /// there is no client to ask, or the thing has no variants beyond itself.
+        /// </summary>
+        private UIControl? BuildVariantList(ItemStack? stack)
+        {
+            if (!ShowVariants || stack?.Collectible?.Code == null)
+                return null;
+
+            ICoreClientAPI? capi = Dialog?.Api;
+
+            if (capi == null)
+                return null;
+
+            List<ItemStack> variants = ItemTypeSelectorControl.CollectVariants(capi, stack.Collectible.Code);
+
+            if (variants.Count <= 1)
+                return null;
+
+            EnsureVariantList();
+
+            _variantList!.SetStacks(variants);
+
+            // The variant the row was opened from, marked in the nested list - so a player who
+            // opened "rock-granite" sees which of the rocks they came from.
+            _variantList.SelectByCode(stack.Collectible.Code);
+
+            return _variantPanel;
+        }
+
+        /// <summary>
+        /// Builds the nested list and the panel that holds it, once.
+        ///
+        /// The heading sits in the panel rather than in the list, because a list draws its own
+        /// frame and a caption inside that frame would read as a row.
+        /// </summary>
+        private void EnsureVariantList()
+        {
+            if (_variantList != null)
+                return;
+
+            _variantPanel = new RectangleControl(_Name: Name + "_variantPanel")
+            {
+                InsideOrientation = IS2Mod.Enums.Orientation.Top
+            };
+
+            if (!string.IsNullOrEmpty(VariantsHeading))
+            {
+                _variantPanel.Children.Add(new TextLabelControl(
+                    text: VariantsHeading,
+                    fontName: GuiStyle.StandardFontName,
+                    fontSize: 16,
+                    textColor: new ElementColor(1.0, 1.0, 1.0, 0.55),
+                    orientation: TextOrientation.MiddleLeft,
+                    padding: 0,
+                    _Name: Name + "_variantsHeading",
+                    _Margin: 2));
+            }
+
+            _variantList = new ItemListViewControl(Name + "_variants", _Margin: 0)
+            {
+                // The one that stops it: a variant opens its description, not another list of
+                // the siblings it is already standing among.
+                ShowVariants = false,
+
+                Size = new PointD(ListViewControl.UnscaledDefaultWidth, UnscaledVariantListHeight),
+                IsAutoSize = false
+            };
+
+            _variantList.SelectionChanged += (sender, e) => VariantSelected?.Invoke(this, e);
+
+            _variantPanel.Children.Add(_variantList);
         }
 
         /// <summary>

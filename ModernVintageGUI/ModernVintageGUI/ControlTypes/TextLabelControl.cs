@@ -140,46 +140,153 @@ namespace IS2Mod.ControlTypes
             return MeasureText();
         }
 
+        #region Measurement cache
+        /// <summary>
+        /// The one surface every measurement is taken on.
+        ///
+        /// Measuring a string needs a Cairo context and nothing else - it never draws - so a
+        /// single pixel surface is enough and there is no reason to build a new one per call.
+        /// That is what it used to do, and at a thousand measurements per layout pass the
+        /// allocation was most of the cost of laying the dialog out.
+        ///
+        /// One per thread, because a Cairo context is not thread safe and the layout harness
+        /// may run passes off the main thread. In the game everything measured here happens on
+        /// the render thread anyway.
+        /// </summary>
+        [ThreadStatic]
+        private static Context? _measureContext;
+
+        private static Context MeasureContext()
+        {
+            if (_measureContext != null)
+                return _measureContext;
+
+            // Deliberately never disposed: it lives as long as the thread does, and a
+            // one pixel surface plus its context is a few dozen bytes.
+            var surface = new ImageSurface(Format.Argb32, 1, 1);
+
+            _measureContext = new Context(surface);
+
+            return _measureContext;
+        }
+
+        /// <summary>Everything the measured size depends on, as of the last measurement.</summary>
+        private string? _measuredText;
+        private string? _measuredFontName;
+        private int _measuredFontSize;
+        private FontWeight _measuredWeight;
+        private FontSlant _measuredSlant;
+        private bool _measuredWordWrap;
+        private double _measuredWrapWidth;
+        private double _measuredScale;
+        private double _measuredPadding;
+        private PointD _measuredSize;
+        private bool _hasMeasurement;
+
+        /// <summary>
+        /// True when nothing that could change the answer has changed since the last
+        /// measurement.
+        ///
+        /// The text of a dialog barely ever changes, and the layout runs on every hover, every
+        /// selection and every scroll - so almost every measurement asks a question that was
+        /// already answered. The properties are plain fields with no change notification, hence
+        /// comparing them rather than invalidating from a setter.
+        /// </summary>
+        private bool MeasurementIsCurrent()
+        {
+            return _hasMeasurement
+                && _measuredFontSize == FontSize
+                && _measuredWeight == FontWeight
+                && _measuredSlant == FontSlant
+                && _measuredWordWrap == WordWrap
+                && _measuredScale == LayoutScale
+                && _measuredPadding == Padding
+                && string.Equals(_measuredText, Text, StringComparison.Ordinal)
+                && string.Equals(_measuredFontName, FontName, StringComparison.Ordinal)
+
+                // Only the wrapping case looks at the box it is given, so only that case may be
+                // invalidated by it - otherwise every stretch of the label would re-measure it.
+                && (!WordWrap || _measuredWrapWidth == Size.X);
+        }
+
+        private void RememberMeasurement(PointD size)
+        {
+            _measuredText = Text;
+            _measuredFontName = FontName;
+            _measuredFontSize = FontSize;
+            _measuredWeight = FontWeight;
+            _measuredSlant = FontSlant;
+            _measuredWordWrap = WordWrap;
+            _measuredWrapWidth = Size.X;
+            _measuredScale = LayoutScale;
+            _measuredPadding = Padding;
+            _measuredSize = size;
+            _hasMeasurement = true;
+        }
+        #endregion
+
         /// <summary>
         /// Measures the text without touching any state, so that repeated layout passes always
         /// produce the same result.
         /// </summary>
         private PointD MeasureText()
         {
-            using (ImageSurface tempSurface = new ImageSurface(Format.Argb32, 1, 1))
-            using (Context ctx = new Context(tempSurface))
+            if (MeasurementIsCurrent())
             {
-                SetupFont(ctx);
-
-                // The height of a line, from the font rather than from the size it was asked
-                // for. Those are not the same number: a 16 point font puts its ascent above the
-                // baseline and its descent below it, and the two together are a good deal more
-                // than 16. Measuring with the nominal size is the reason a button came out too
-                // short for its own caption and the tail of a "p" hung out of the bottom - the
-                // text was drawn correctly, the box around it was simply wrong.
-                Cairo.FontExtents fe = ctx.FontExtents;
-                double lineHeight = fe.Ascent + fe.Descent;
-
-                if (string.IsNullOrEmpty(Text))
-                {
-                    return new PointD(ScaledPadding * 2, lineHeight + ScaledPadding * 2);
-                }
-
-                if (WordWrap && Size.X > 0)
-                {
-                    PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2));
-                    return new PointD(Size.X, wrappedSize.Y + (ScaledPadding * 2));
-                }
-
-                // XAdvance, not Width: Width is the inked bounding box and leaves out the side
-                // bearings, which makes the box too narrow for the text it is supposed to hold.
-                TextExtents te = ctx.TextExtents(Text);
-
-                return new PointD(
-                    te.XAdvance + (ScaledPadding * 2),
-                    lineHeight + (ScaledPadding * 2)
-                );
+                IS2Mod.Diagnostics.UIProfiler.Count("text   MeasureText (cached)");
+                return _measuredSize;
             }
+
+            IS2Mod.Diagnostics.UIProfiler.Scope profileScope = IS2Mod.Diagnostics.UIProfiler.Begin();
+
+            try
+            {
+                PointD measured = MeasureTextCore();
+
+                RememberMeasurement(measured);
+
+                return measured;
+            }
+            finally
+            {
+                IS2Mod.Diagnostics.UIProfiler.End("text   MeasureText (Cairo)", profileScope);
+            }
+        }
+
+        private PointD MeasureTextCore()
+        {
+            Context ctx = MeasureContext();
+
+            SetupFont(ctx);
+
+            // The height of a line, from the font rather than from the size it was asked for.
+            // Those are not the same number: a 16 point font puts its ascent above the baseline
+            // and its descent below it, and the two together are a good deal more than 16.
+            // Measuring with the nominal size is the reason a button came out too short for its
+            // own caption and the tail of a "p" hung out of the bottom - the text was drawn
+            // correctly, the box around it was simply wrong.
+            Cairo.FontExtents fe = ctx.FontExtents;
+            double lineHeight = fe.Ascent + fe.Descent;
+
+            if (string.IsNullOrEmpty(Text))
+            {
+                return new PointD(ScaledPadding * 2, lineHeight + ScaledPadding * 2);
+            }
+
+            if (WordWrap && Size.X > 0)
+            {
+                PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2));
+                return new PointD(Size.X, wrappedSize.Y + (ScaledPadding * 2));
+            }
+
+            // XAdvance, not Width: Width is the inked bounding box and leaves out the side
+            // bearings, which makes the box too narrow for the text it is supposed to hold.
+            TextExtents te = ctx.TextExtents(Text);
+
+            return new PointD(
+                te.XAdvance + (ScaledPadding * 2),
+                lineHeight + (ScaledPadding * 2)
+            );
         }
 
         private PointD CalculateWrappedTextSize(Context ctx, string text, double maxWidth)
@@ -261,10 +368,36 @@ namespace IS2Mod.ControlTypes
             TextExtents te = ctx.TextExtents(Text);
             Cairo.FontExtents fe = ctx.FontExtents;
 
-            (double x, double y) = GetTextPosition(te, fe, CapHeight(ctx));
+            (double x, double y) = GetTextPosition(te, fe, CapHeightCached(ctx));
 
             ctx.MoveTo(x, y);
             ctx.ShowText(Text);
+        }
+
+        /// <summary>
+        /// Cap heights already measured, by font. One entry per font, size, weight and slant in
+        /// use, which for a dialog is a handful.
+        ///
+        /// It is worth a cache because it is measured *per drawn label per redraw* - a text
+        /// extent call on every label of the dialog, every time anything is hovered, for a
+        /// number that only depends on the font. Keyed by the scaled size rather than the
+        /// authored one, because that is what Cairo is actually asked for.
+        /// </summary>
+        private static readonly System.Collections.Generic.Dictionary<(string, double, FontWeight, FontSlant), double>
+            CapHeights = new System.Collections.Generic.Dictionary<(string, double, FontWeight, FontSlant), double>();
+
+        private double CapHeightCached(Context ctx)
+        {
+            var key = (FontName, ScaledFontSize, FontWeight, FontSlant);
+
+            if (CapHeights.TryGetValue(key, out double cached))
+                return cached;
+
+            double measured = CapHeight(ctx);
+
+            CapHeights[key] = measured;
+
+            return measured;
         }
 
         /// <summary>

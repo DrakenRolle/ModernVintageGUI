@@ -79,7 +79,10 @@ in game, so it cannot show a screen that no longer exists.*
 <h2>What is still ongoing</h2>
 
 * `Orientation` (a control's own alignment) is inert, and `Orientation.Fill` is not implemented
-* Redraw invalidation - every hover state change currently recomposes the whole surface
+* Redraw invalidation - every hover state change still redraws the whole surface. On the showcase
+  that is ~9 ms at GUI scale 1 and ~19 ms at scale 2, most of it now the text. The way out is the
+  one vanilla takes and `ItemSlotControl` already takes here: compose an element once into a
+  surface of its own and blit it. Measure before you guess - see `--profile`
 * Re-centering on window resize
 * XAML editor or custom UI designer
 * More styling options (custom backgrounds, fonts)
@@ -339,10 +342,23 @@ tooltip on every row, and details that describe the picked item with the game's 
 than with text you typed a second time.
 
 ```csharp
-var items = new ItemListViewControl { Size = new PointD(230, 160), IsAutoSize = false };
+var items = new ItemListViewControl { Size = new PointD(230, 280), IsAutoSize = false };
 items.SetStacks(stacks);            // or SetCollectibles(...)
 items.SelectedStack;                // ItemStack?
 items.SelectedCode;                 // AssetLocation?
+```
+
+Opening a row also folds out **every variant of that block, as a list of its own** - one row for
+rock, and inside it the granite, the andesite and the chalk, each with the game's icon and
+tooltip. It is the same control nested one level deep, and that is also where it stops: the nested
+list has `ShowVariants = false`, so a variant opens its description rather than a third list.
+`VariantSelected` reports a pick from the inner list, while `SelectionChanged` stays on the kind
+that was opened.
+
+Any row can carry a control for its details, which is all the variant list is:
+
+```csharp
+row.DetailContent = myOwnPanel;     // shown under the facts while this row is open
 ```
 
 A tree is a list whose rows fold out. The nodes are data, not controls - the rows are made from
@@ -428,6 +444,31 @@ dotnet run --project ModernVintageGUI/ZLayoutHarness -- --docs docs/images
 
 What the harness cannot cover is anything that only exists at runtime in the game: the Harmony
 patches, the real mouse grab, focus and depth against vanilla dialogs, and GPU uploads.
+
+<h2>Profiling</h2>
+
+The same harness times what a dialog costs, per control type, so "the UI feels slow" turns into a
+line to look at:
+
+```
+dotnet run --project ModernVintageGUI/ZLayoutHarness -- --profile
+```
+
+It reports a layout pass and a redraw of the showcase tree separately, each split by control type
+into *self* time and *total* time - a container with a large total and a small self is not slow,
+the fifty rows in it are. It also prints the same dialog at GUI scale 2, because the drawing scales
+with the *area* of the dialog rather than with the number of controls.
+
+In the game, where the GPU upload and the per frame item pass also exist:
+
+```
+.mvsui profile 60
+```
+
+That records the next 60 frames of whatever dialogs are open and prints the report to the chat and
+the log. Move the cursor across the dialog while it runs - a hover is what triggers a redraw, and a
+report taken over a still cursor measures an idle dialog. The switch behind both is
+`IS2Mod.Diagnostics.UIProfiler`, which a mod can drive itself.
 
 <h1>Building</h1>
 

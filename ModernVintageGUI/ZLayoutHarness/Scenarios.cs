@@ -177,6 +177,16 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "item-list-variants",
+                Description = "An item list with a list of its own folded out under the picked "
+                            + "row - what the game fills with every variant of that block. The "
+                            + "nested list scrolls inside the panel, which scrolls inside the "
+                            + "outer list.",
+                Build = BuildItemListVariants
+            };
+
+            yield return new Scenario
+            {
                 Name = "tree-view",
                 Description = "A tree with one branch folded out and a branch inside it, one "
                             + "node picked and one hovered - the indent, the expander and the "
@@ -728,6 +738,59 @@ namespace LayoutHarness
 
             list.Select(1);
             list.Items[3].InvokeEventEnter(new MouseEvent(0, 0));
+
+            root.Children.Add(list);
+            return root;
+        }
+
+        /// <summary>
+        /// The nested list, which in the game is every variant of the picked block.
+        ///
+        /// Without a client there is no block registry to ask, so the nested list is put on the
+        /// row by hand through the same property the control fills - what this picture is about
+        /// is the layout of a list inside a panel inside a list, and that is the same either way.
+        /// </summary>
+        private static RectangleControl BuildItemListVariants()
+        {
+            RectangleControl root = CreateRoot();
+
+            var list = new ItemListViewControl(_Name: "itemList")
+            {
+                Size = new PointD(250, 300),
+                IsAutoSize = false
+            };
+
+            var variants = new ItemListViewControl(_Name: "variants", _Margin: 0)
+            {
+                ShowVariants = false,
+                Size = new PointD(250, 120),
+                IsAutoSize = false
+            };
+
+            variants.SetItems(new[]
+            {
+                new ListViewItem("Granite"),
+                new ListViewItem("Andesite"),
+                new ListViewItem("Chalk"),
+                new ListViewItem("Basalt")
+            });
+
+            variants.Select(0);
+
+            var rock = new ListViewItem("Rock")
+            {
+                Description = "Every rock in the world, in one row.",
+                DetailContent = variants
+            };
+
+            list.SetItems(new[]
+            {
+                rock,
+                new ListViewItem("Log"),
+                new ListViewItem("Plank")
+            });
+
+            list.ShowDetails(rock);
 
             root.Children.Add(list);
             return root;

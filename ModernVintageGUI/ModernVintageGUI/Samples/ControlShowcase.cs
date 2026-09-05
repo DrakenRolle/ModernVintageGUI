@@ -634,12 +634,16 @@ namespace ModernVintageGUI.Samples
         }
 
         /// <summary>How tall the item list in the showcase is, in author units.</summary>
-        private const double ItemListViewHeight = 160.0;
+        private const double ItemListViewHeight = 280.0;
 
         /// <summary>
-        /// A list of item types that is browsed rather than picked from: every row carries the
+        /// A list of blocks that is browsed rather than picked from: every row carries the
         /// game's item tooltip, and clicking one folds out the game's own description of it -
-        /// the same text the handbook shows - under that row.
+        /// the same text the handbook shows - plus a list of every variant of that block, under
+        /// that row.
+        ///
+        /// Blocks rather than items, because blocks are the ones that come in variants: one row
+        /// for rock, and inside it the granite, the andesite and the chalk.
         /// </summary>
         private static UIControl BuildItemListView(ICoreClientAPI? capi)
         {
@@ -651,20 +655,33 @@ namespace ModernVintageGUI.Samples
 
             if (capi != null)
             {
+                // One row per *kind* rather than one per block: the whole point of the nested
+                // list is that the variants live inside the row, and a flat list of all of them
+                // would have nothing left to open.
                 var stacks = new List<ItemStack>();
+                var seen = new HashSet<string>();
 
-                foreach (Item item in capi.World.Items)
+                foreach (Block block in capi.World.Blocks)
                 {
                     if (stacks.Count >= ItemDropdownCount)
                         break;
 
-                    if (item?.Code != null)
-                    {
-                        stacks.Add(new ItemStack(item));
-                    }
+                    if (block?.Code == null || block.Code.Path.Length == 0)
+                        continue;
+
+                    int dash = block.Code.Path.IndexOf('-');
+                    string kind = dash < 0 ? block.Code.Path : block.Code.Path.Substring(0, dash);
+
+                    if (!seen.Add(block.Code.Domain + ":" + kind))
+                        continue;
+
+                    stacks.Add(new ItemStack(block));
                 }
 
                 list.SetStacks(stacks);
+
+                list.VariantSelected += (sender, e) =>
+                    capi.ShowChatMessage("Variant: " + (e.Value ?? "none"));
             }
             else
             {

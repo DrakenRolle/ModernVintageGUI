@@ -215,17 +215,22 @@ namespace ModernVintageGUI.ControlTypes
             double blur = Scaled(8.0);
             try
             {
+                // Through SurfaceBlur, which blurs the bar on a surface of the bar's size rather
+                // than on the dialog's: BlurPartial takes a rectangle but costs what the whole
+                // surface costs, and this one runs seventeen passes. On a full width title bar
+                // that was two milliseconds of every redraw of the dialog.
+                //
                 // The last two arguments are x2/y2, not width/height. Vanilla passes OuterWidth
                 // and InnerHeight here, which only lines up because its bar sits at 0/0 - ours
                 // has to add the position.
-                SurfaceTransformBlur.BlurPartial(
+                SurfaceBlur.BlurRegion(
                     surface,
+                    Position.X,
+                    Position.Y,
+                    Position.X + Size.X,
+                    Position.Y + Size.Y,
                     blur,
-                    (int)(2.0 * blur + 1.0),
-                    (int)Position.X,
-                    (int)Position.Y,
-                    (int)(Position.X + Size.X),
-                    (int)(Position.Y + Size.Y));
+                    (int)(2.0 * blur + 1.0));
             }
             catch (Exception ex)
             {

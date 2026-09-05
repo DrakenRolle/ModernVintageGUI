@@ -178,9 +178,15 @@ namespace IS2Mod.ControlTypes.Custom
             int width = Math.Max(1, (int)Size.X);
             int height = Math.Max(1, (int)Size.Y);
 
+            Diagnostics.UIProfiler.Scope allocation = Diagnostics.UIProfiler.Begin();
+
             using (ImageSurface surface = new ImageSurface(Format.Argb32, width, height))
             using (Context context = GuiElement.GenContext(surface))
             {
+                Diagnostics.UIProfiler.End("redraw surface + context", allocation);
+
+                Diagnostics.UIProfiler.Scope drawing = Diagnostics.UIProfiler.Begin();
+
                 // Draw dialog background
                 DrawDialogBackground(context);
 
@@ -191,11 +197,17 @@ namespace IS2Mod.ControlTypes.Custom
                 // operations have to be committed to the backing buffer first.
                 surface.Flush();
 
+                Diagnostics.UIProfiler.End("redraw tree drawing", drawing);
+
+                Diagnostics.UIProfiler.Scope upload = Diagnostics.UIProfiler.Begin();
+
                 // A single upload of the finished surface. LoadOrUpdateCairoTexture reuses the
                 // GL texture of the passed LoadedTexture, so repeated refreshes do not leak.
                 LoadedTexture texture = StaticElementsTexture ?? new LoadedTexture(Api);
                 Api.Gui.LoadOrUpdateCairoTexture(surface, linearMag: true, intoTexture: ref texture);
                 StaticElementsTexture = texture;
+
+                Diagnostics.UIProfiler.End("redraw GPU upload", upload);
             }
         }
 

@@ -499,7 +499,7 @@ namespace IS2Mod.ControlTypes
             {
                 foreach (var child in Children)
                 {
-                    child.GenerateRenderData(surface, context);
+                    child.DrawProfiled(surface, context);
                 }
 
                 return;
@@ -522,10 +522,30 @@ namespace IS2Mod.ControlTypes
 
             foreach (var child in Children)
             {
-                child.GenerateRenderData(surface, context);
+                child.DrawProfiled(surface, context);
             }
 
             context.Restore();
+        }
+
+        /// <summary>
+        /// Draws a child, timing it when <see cref="Diagnostics.UIProfiler"/> is switched on.
+        ///
+        /// The child loop is the one place every control passes through on its way to the
+        /// surface, so instrumenting it once here measures the whole tree without a line of
+        /// profiling code in any control. Switched off it is a static bool read.
+        /// </summary>
+        private void DrawProfiled(ImageSurface surface, Context context)
+        {
+            if (!Diagnostics.UIProfiler.Enabled)
+            {
+                GenerateRenderData(surface, context);
+                return;
+            }
+
+            Diagnostics.UIProfiler.Scope scope = Diagnostics.UIProfiler.Begin();
+            GenerateRenderData(surface, context);
+            Diagnostics.UIProfiler.End("draw   " + GetType().Name, scope);
         }
 
         /// <summary>
@@ -816,7 +836,12 @@ namespace IS2Mod.ControlTypes
             if (dialog == null || !dialog.IsVisible)
                 return;
 
+            Diagnostics.UIProfiler.Scope scope = Diagnostics.UIProfiler.Begin();
+
             dialog.PerformLayout();
+
+            Diagnostics.UIProfiler.End("layout PerformLayout (from RecomposeToMain)", scope);
+
             dialog.Refresh();
         }
         #endregion
@@ -834,7 +859,7 @@ namespace IS2Mod.ControlTypes
 
             foreach (UIControl child in Children)
             {
-                PointD childSize = child.CalculateSize();
+                PointD childSize = child.MeasureProfiled();
                 PointD childSizeWithSpacing = GetChildSizeWithSpacing(child, childSize);
                 content = MergeSizeByOrientation(childSizeWithSpacing, content);
             }
@@ -864,6 +889,19 @@ namespace IS2Mod.ControlTypes
         }
 
 
+        /// <summary>Measures a child, timing it when the profiler is switched on.</summary>
+        private PointD MeasureProfiled()
+        {
+            if (!Diagnostics.UIProfiler.Enabled)
+                return CalculateSize();
+
+            Diagnostics.UIProfiler.Scope scope = Diagnostics.UIProfiler.Begin();
+            PointD measured = CalculateSize();
+            Diagnostics.UIProfiler.End("measure " + GetType().Name, scope);
+
+            return measured;
+        }
+
         /// <summary>
         /// Normalizes children sizes based on delta division of parent's available space.
         /// - Top/Bottom orientation: All children get parent's content width
@@ -873,6 +911,8 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public virtual void NormalizeChildrenByDelta()
         {
+            Diagnostics.UIProfiler.Count("walk   NormalizeChildrenByDelta");
+
             if (Children.Count == 0)
                 return;
 
@@ -901,7 +941,14 @@ namespace IS2Mod.ControlTypes
                     break;
             }
 
-            // Recursively normalize all descendants
+            // Down the tree, once per child.
+            //
+            // The stretching above only sets the children's own sizes; this is what carries the
+            // pass into them, and it is deliberately the *only* place that does. Recursing from
+            // inside the stretching as well - which is what used to happen - meant every level
+            // walked its subtree twice, so the cost doubled per level: a nine level tree of two
+            // hundred controls took thirteen thousand of these calls instead of two hundred, and
+            // every one of them re-measured the text of every button it passed.
             foreach (UIControl child in Children)
             {
                 child.NormalizeChildrenByDelta();
@@ -929,11 +976,10 @@ namespace IS2Mod.ControlTypes
                 // Stretching is part of arranging, so it goes through SetLayoutSize and
                 // leaves the measured size (_calculatedSize) untouched - overwriting that
                 // would destroy the natural size the next measure pass builds on.
+                //
+                // No recursion here: the caller walks into every child once, after all of them
+                // have been given their width. See NormalizeChildrenByDelta.
                 child.SetLayoutSize(new PointD(childAvailableWidth, child.Size.Y));
-                if (child.Children.Count > 0)
-                {
-                    child.NormalizeChildrenByDelta();
-                }
             }
         }
 
@@ -954,12 +1000,9 @@ namespace IS2Mod.ControlTypes
                 // Same as above, on the other axis.
                 childAvailableHeight = child.ClampToMaxSize(new PointD(0, childAvailableHeight)).Y;
 
-                // Same as above: arrange writes the layout size, not the measured size.
+                // Same as above: arrange writes the layout size, not the measured size, and the
+                // walk into the children is the caller's.
                 child.SetLayoutSize(new PointD(child.Size.X, childAvailableHeight));
-                if (child.Children.Count > 0)
-                {
-                    child.NormalizeChildrenByDelta();
-                }
             }
         }
 
@@ -1017,6 +1060,8 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public virtual void CalculateAllPositions()
         {
+            Diagnostics.UIProfiler.Count("walk   CalculateAllPositions");
+
             // Root element starts at origin
             if (Parent == null)
             {
@@ -1041,6 +1086,8 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public void CalculatePosition(UIControl? previousSibling)
         {
+            Diagnostics.UIProfiler.Count("walk   CalculatePosition");
+
             if (Parent == null)
             {
                 Position = new PointD(0, 0);

@@ -149,7 +149,11 @@ namespace IS2Mod.ControlTypes.Renderer
             //
             // Drawing and uploading from inside the render stage is what the game does itself -
             // GuiComposer.Render() checks recomposeOnRender and recomposes right there.
+            Diagnostics.UIProfiler.Scope redraw = Diagnostics.UIProfiler.Begin();
+
             _dialog.EnsureRendered();
+
+            Diagnostics.UIProfiler.End("frame  EnsureRendered (redraw when dirty)", redraw);
 
             LoadedTexture? texture = _dialog.StaticElementsTexture;
 
@@ -169,7 +173,13 @@ namespace IS2Mod.ControlTypes.Renderer
 
             // Anything that cannot live in the Cairo surface - item stacks, above all - goes on
             // top of it, every frame. Same split the vanilla GUI makes.
+            Diagnostics.UIProfiler.Scope interactive = Diagnostics.UIProfiler.Begin();
+
             _dialog.GenerateInteractiveRenderData(_api, deltaTime);
+
+            Diagnostics.UIProfiler.End("frame  interactive pass (item stacks)", interactive);
+
+            Diagnostics.UIProfiler.EndFrame();
         }
 
         private void RenderDialogTexture(LoadedTexture texture, float z)

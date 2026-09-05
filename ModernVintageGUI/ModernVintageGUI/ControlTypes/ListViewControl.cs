@@ -668,6 +668,20 @@ namespace ModernVintageGUI.ControlTypes
         /// <summary>The labelled facts the detail view shows under the paragraph.</summary>
         public IList<DetailEntry> Details { get; } = new List<DetailEntry>();
 
+        /// <summary>
+        /// A control the detail view shows under the facts - a list of its own, a picture, a row
+        /// of buttons that act on this row.
+        ///
+        /// This is what makes the details more than a text panel: the thing a row stands for
+        /// often has its own contents, and those are a control rather than a sentence. See
+        /// <see cref="ItemListViewControl"/>, which fills it with every variant of the picked
+        /// block.
+        ///
+        /// It is shown while this row's details are open and taken off the tree again when they
+        /// are not, so one control can be handed to several rows in turn.
+        /// </summary>
+        public UIControl? DetailContent { get; set; }
+
         /// <summary>The list this row belongs to. Set when it is handed to the list.</summary>
         internal ListViewControl? OwnerList { get; set; }
         #endregion

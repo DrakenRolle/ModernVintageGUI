@@ -135,6 +135,8 @@ namespace IS2Mod.ControlTypes
         #region Rendering
         public override void GenerateRenderData(ImageSurface surface, Context ctx)
         {
+            Diagnostics.UIProfiler.Scope borders = Diagnostics.UIProfiler.Begin();
+
             // Render borders first
             if (RoundedCorners == 0)
             {
@@ -147,10 +149,21 @@ namespace IS2Mod.ControlTypes
 
             RenderBackground(ctx);
 
-            // NEW: Apply Gaussian blur to borders if enabled
-            if (BlurRange > 0 && BlurEdgeWidth > 0)
+            Diagnostics.UIProfiler.End("rect   borders + background", borders);
+
+            // NEW: Apply Gaussian blur to borders if enabled.
+            //
+            // A border of zero width has nothing to soften, and blurring it anyway is not free:
+            // it is a CPU pass over every pixel of this control on every redraw of the dialog,
+            // which for a button is most of what drawing that button costs. That case is real -
+            // ButtonControl.ShowEmboss = false leaves the blur switched on with nothing under it.
+            if (BlurRange > 0 && BlurEdgeWidth > 0 && BorderWidth > 0)
             {
+                Diagnostics.UIProfiler.Scope blur = Diagnostics.UIProfiler.Begin();
+
                 ApplyBlurToBorders(surface);
+
+                Diagnostics.UIProfiler.End("rect   blur (SurfaceTransformBlur)", blur);
             }
 
             // Render children - clipped to the viewport when this container scrolls
@@ -615,15 +628,18 @@ namespace IS2Mod.ControlTypes
 
                     // Blur radius is a geometric dimension, so it scales - the same way vanilla
                     // uses GuiElement.scaled(9.0) for its dialog background blur.
-                    SurfaceTransformBlur.BlurPartial(
+                    //
+                    // Through SurfaceBlur rather than straight to SurfaceTransformBlur: the
+                    // latter's cost follows the whole surface, so on a dialog it made every
+                    // button pay for the size of the dialog. See that class.
+                    SurfaceBlur.BlurRegion(
                         surface,
-                        BlurRange * LayoutScale,
-                        (int)Math.Round(BlurEdgeWidth * LayoutScale),
                         x,
                         y,
-                        x + width,
-                        y + height
-                    );
+                        width,
+                        height,
+                        BlurRange * LayoutScale,
+                        (int)Math.Round(BlurEdgeWidth * LayoutScale));
                 }
                 catch (Exception ex)
                 {

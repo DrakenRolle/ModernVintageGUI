@@ -139,6 +139,7 @@ namespace ModernVintageGUI.ControlTypes
 
         private readonly DummySlot _preview = new DummySlot();
         private readonly List<DetailEntry> _entries = new List<DetailEntry>();
+        private UIControl? _content;
         private bool _autoHeight;
         #endregion
 
@@ -238,10 +239,21 @@ namespace ModernVintageGUI.ControlTypes
             string? description = null,
             IEnumerable<DetailEntry>? entries = null,
             ItemStack? stack = null,
-            string? iconName = null)
+            string? iconName = null,
+            UIControl? content = null)
         {
             _title.Text = title ?? "";
             Description = string.IsNullOrWhiteSpace(description) ? null : description;
+
+            // A control from a previous row has to go before the new one arrives - it may be the
+            // same object, and adding a control that is already in the tree twice would give it
+            // two parents.
+            if (_content != null && !ReferenceEquals(_content, content))
+            {
+                Children.Remove(_content);
+            }
+
+            _content = content;
 
             _entries.Clear();
 
@@ -269,7 +281,7 @@ namespace ModernVintageGUI.ControlTypes
                 return;
             }
 
-            Show(item.Text, item.Description, item.Details, item.Stack, item.IconName);
+            Show(item.Text, item.Description, item.Details, item.Stack, item.IconName, item.DetailContent);
         }
 
         /// <summary>Empties the panel. The frame stays, the content does not.</summary>
@@ -280,6 +292,12 @@ namespace ModernVintageGUI.ControlTypes
             _entries.Clear();
             _preview.Itemstack = null;
             _previewIcon.IconName = null;
+
+            if (_content != null)
+            {
+                Children.Remove(_content);
+                _content = null;
+            }
 
             HasContent = false;
 
@@ -324,6 +342,13 @@ namespace ModernVintageGUI.ControlTypes
             if (_entryHost.Children.Count > 0)
             {
                 Children.Add(_entryHost);
+            }
+
+            // Last, under everything the panel says about the row itself - a list of what is
+            // *in* it reads as a continuation, not as a heading.
+            if (_content != null)
+            {
+                Children.Add(_content);
             }
 
             // Back to the top: the panel is showing something else now, and leaving it scrolled

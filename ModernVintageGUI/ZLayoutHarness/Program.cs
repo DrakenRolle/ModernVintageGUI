@@ -58,6 +58,14 @@ namespace LayoutHarness
                 return DocImages.Generate(docsDir);
             }
 
+            // "--profile [passes]" times the layout and the drawing instead of checking them.
+            if (args.Length > 0 && args[0] == "--profile")
+            {
+                int passes = args.Length > 1 && int.TryParse(args[1], out int parsed) ? parsed : 20;
+
+                return Profile.Run(passes);
+            }
+
             string outputDir = args.Length > 0
                 ? args[0]
                 : IOPath.Combine(AppContext.BaseDirectory, "layout-output");

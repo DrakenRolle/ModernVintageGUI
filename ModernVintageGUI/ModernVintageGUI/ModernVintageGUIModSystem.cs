@@ -83,6 +83,59 @@ namespace ModernVintageGUI
 
             api.Input.RegisterHotKey(TestDialogHotkey, "Toggle ModernVintageGUI test dialog", GlKeys.J, HotkeyType.GUIOrOtherControls);
             api.Input.SetHotKeyHandler(TestDialogHotkey, OnDialogHotkey);
+
+            RegisterProfileCommand(api);
+        }
+
+        /// <summary>
+        /// <c>.mvsui profile [frames]</c> - times what the open dialogs cost for the next few
+        /// frames and prints the result.
+        ///
+        /// It is here rather than in the layout harness because two of the three costs only
+        /// exist in the game: uploading the finished surface to the GPU, and the per frame pass
+        /// that draws the item stacks. The report names the redraw, the upload, the layout and
+        /// every control type separately, so "the dialog is slow" turns into a line to look at.
+        ///
+        /// Move the cursor across the dialog while it runs - a hover is what triggers a redraw,
+        /// and a report taken over a still cursor measures an idle dialog.
+        /// </summary>
+        private void RegisterProfileCommand(ICoreClientAPI api)
+        {
+            api.ChatCommands
+                .Create("mvsui")
+                .WithDescription("ModernVintageGUI diagnostics")
+                .BeginSubCommand("profile")
+                .WithDescription("Time the open dialogs for the next few frames")
+                .WithArgs(api.ChatCommands.Parsers.OptionalInt("frames"))
+                .HandleWith(OnProfileCommand)
+                .EndSubCommand();
+        }
+
+        private TextCommandResult OnProfileCommand(TextCommandCallingArgs args)
+        {
+            ICoreClientAPI? capi = clientApi;
+
+            if (capi == null)
+                return TextCommandResult.Error("No client.");
+
+            int frames = args.Parsers[0].IsMissing ? 60 : (int)args.Parsers[0].GetValue();
+
+            IS2Mod.Diagnostics.UIProfiler.RunForFrames(frames, report =>
+            {
+                // The chat window eats long lines, so the report goes to the log as well - that
+                // is the copy worth pasting into a bug report.
+                capi.Logger.Notification("[ModernVintageGUI] " + System.Environment.NewLine + report);
+
+                foreach (string line in report.Split('\n'))
+                {
+                    if (line.Trim().Length > 0)
+                    {
+                        capi.ShowChatMessage(line.TrimEnd());
+                    }
+                }
+            });
+
+            return TextCommandResult.Success("Profiling " + frames + " frames - move the cursor over the dialog.");
         }
 
         private bool OnDialogHotkey(KeyCombination keyCombination)
