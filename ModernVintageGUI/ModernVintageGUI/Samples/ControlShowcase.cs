@@ -68,9 +68,131 @@ namespace ModernVintageGUI.Samples
             content.Children.Add(BuildLeftColumn(capi));
             content.Children.Add(BuildRightColumn(capi, gridInventory));
             content.Children.Add(BuildThirdColumn(capi));
+            content.Children.Add(BuildFourthColumn(capi));
 
             parent.Children.Add(content);
         }
+
+        #region Fourth column - lists and trees
+        /// <summary>Sizes of the list controls in the showcase, in author units.</summary>
+        private const double ListViewWidth = 210.0;
+        private const double ListViewHeight = 260.0;
+        private const double TreeViewHeight = 170.0;
+
+        private static UIControl BuildFourthColumn(ICoreClientAPI? capi)
+        {
+            var column = new RectangleControl(_Name: "fourthColumn")
+            {
+                InsideOrientation = Orientation.Top,
+                Padding = 4
+            };
+
+            column.Children.Add(Heading("List view with row details"));
+            column.Children.Add(BuildListView(capi));
+
+            column.Children.Add(Heading("Tree"));
+            column.Children.Add(BuildTreeView(capi));
+
+            return column;
+        }
+
+        /// <summary>
+        /// A list whose rows fold their details out under themselves, which is what a list does
+        /// unless it is told otherwise. Clicking another row moves the panel there, clicking the
+        /// open row again folds it back in.
+        /// </summary>
+        private static UIControl BuildListView(ICoreClientAPI? capi)
+        {
+            var list = new ListViewControl(_Name: "listView")
+            {
+                Size = new PointD(ListViewWidth, ListViewHeight),
+                IsAutoSize = false
+            };
+
+            list.SetItems(new[]
+            {
+                new ListViewItem("Granite", value: "granite")
+                {
+                    Secondary = "hard",
+                    Description = "A coarse grained rock. Common in the deeper layers, and the "
+                                + "one most millstones are cut from.",
+                    Details =
+                    {
+                        new DetailEntry("Layer", "Deep"),
+                        new DetailEntry("Tool", "Pickaxe")
+                    }
+                },
+                new ListViewItem("Andesite", value: "andesite")
+                {
+                    Secondary = "hard",
+                    Description = "A volcanic rock, grey and fine grained.",
+                    Details = { new DetailEntry("Layer", "Middle") }
+                },
+                new ListViewItem("Chalk", value: "chalk")
+                {
+                    Secondary = "soft",
+                    Description = "Soft, pale and easily worked. Burns to quicklime.",
+                    Details = { new DetailEntry("Layer", "Upper") }
+                },
+                new ListViewItem("Basalt", value: "basalt")
+                {
+                    Secondary = "hard",
+                    Description = "Dark and dense, from cooled lava."
+                },
+                new ListViewItem("Limestone", value: "limestone")
+                {
+                    Secondary = "soft",
+                    Description = "The rock most of the caves in this world were dissolved out of."
+                }
+            });
+
+            list.SelectionChanged += (sender, e) =>
+                capi?.ShowChatMessage("List view: " + (e.Value ?? "none"));
+
+            // One row already folded out, so the picture - and the dialog the test hotkey opens -
+            // shows what a click does rather than a plain list of captions.
+            list.ShowDetails(list.Items[0]);
+
+            return list;
+        }
+
+        /// <summary>
+        /// A tree with three branches, one of them open. Values on the leaves, so a pick reports
+        /// something a mod would actually store.
+        /// </summary>
+        private static UIControl BuildTreeView(ICoreClientAPI? capi)
+        {
+            var tree = new TreeViewControl(_Name: "treeView")
+            {
+                Size = new PointD(ListViewWidth, TreeViewHeight),
+                IsAutoSize = false
+            };
+
+            TreeNode rocks = tree.AddNode("Rocks", iconName: GuiIcons.Erode);
+            rocks.Add("Granite", "rock-granite");
+            rocks.Add("Andesite", "rock-andesite");
+
+            TreeNode soft = rocks.Add("Soft", "rock-soft");
+            soft.Add("Chalk", "rock-chalk");
+            soft.Add("Limestone", "rock-limestone");
+
+            TreeNode wood = tree.AddNode("Wood", iconName: GuiIcons.Line);
+            wood.Add("Oak", "log-oak");
+            wood.Add("Birch", "log-birch");
+            wood.Add("Pine", "log-pine");
+
+            tree.AddNode("Loose ends", iconName: GuiIcons.Dice);
+
+            // Open one branch and not the others: a tree that opens closed says nothing about
+            // what it holds, and one that opens fully unfolded is a list.
+            rocks.Expand();
+
+            tree.SelectionChanged += (sender, e) =>
+                capi?.ShowChatMessage("Tree: " + (e.Value ?? e.Node?.Text ?? "none"));
+
+            return tree;
+        }
+        #endregion
 
         #region Third column - the rest of the controls
         private static UIControl BuildThirdColumn(ICoreClientAPI? capi)
@@ -505,7 +627,63 @@ namespace ModernVintageGUI.Samples
             column.Children.Add(Heading("Single slot and item type"));
             column.Children.Add(BuildSlotRow(capi));
 
+            column.Children.Add(Heading("Item list"));
+            column.Children.Add(BuildItemListView(capi));
+
             return column;
+        }
+
+        /// <summary>How tall the item list in the showcase is, in author units.</summary>
+        private const double ItemListViewHeight = 160.0;
+
+        /// <summary>
+        /// A list of item types that is browsed rather than picked from: every row carries the
+        /// game's item tooltip, and clicking one folds out the game's own description of it -
+        /// the same text the handbook shows - under that row.
+        /// </summary>
+        private static UIControl BuildItemListView(ICoreClientAPI? capi)
+        {
+            var list = new ItemListViewControl(_Name: "itemListView")
+            {
+                Size = new PointD(230, ItemListViewHeight),
+                IsAutoSize = false
+            };
+
+            if (capi != null)
+            {
+                var stacks = new List<ItemStack>();
+
+                foreach (Item item in capi.World.Items)
+                {
+                    if (stacks.Count >= ItemDropdownCount)
+                        break;
+
+                    if (item?.Code != null)
+                    {
+                        stacks.Add(new ItemStack(item));
+                    }
+                }
+
+                list.SetStacks(stacks);
+            }
+            else
+            {
+                // No client - the layout harness. Rows without stacks, so the picture still
+                // shows the list; the icon column stays empty because drawing a stack needs the
+                // game's item atlas.
+                list.SetItems(new[]
+                {
+                    new ListViewItem("Jam") { Description = "A jar of it." },
+                    new ListViewItem("Meat Stew") { Description = "Warm, and rather good." },
+                    new ListViewItem("Porridge"),
+                    new ListViewItem("Scrambled Eggs")
+                });
+            }
+
+            list.ItemActivated += (sender, e) =>
+                capi?.ShowChatMessage("Item list: " + (e.Value ?? e.Item?.Text ?? "none"));
+
+            return list;
         }
 
         /// <summary>

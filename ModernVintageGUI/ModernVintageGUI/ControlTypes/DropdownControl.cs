@@ -217,6 +217,27 @@ namespace ModernVintageGUI.ControlTypes
             }
         }
 
+        /// <summary>
+        /// Shade every other row a touch differently, so a wide row's caption and its icon can
+        /// still be read as belonging together. On by default.
+        ///
+        /// Worth turning off only for a list of two or three rows, where the banding is a
+        /// pattern without a job.
+        /// </summary>
+        public bool RowStriping
+        {
+            get => _rowStriping;
+            set
+            {
+                if (_rowStriping == value)
+                    return;
+
+                _rowStriping = value;
+                ApplyRowStyle();
+                RecomposeToMain();
+            }
+        }
+
         public bool IsOpen => _popup.IsOpen;
 
         /// <summary>Raised when the selection changes, by click, by keyboard or from code.</summary>
@@ -233,6 +254,10 @@ namespace ModernVintageGUI.ControlTypes
         private string _placeholder = "";
         private bool _isDisposed;
         private DropdownRowStyle _rowStyle = DropdownRowStyle.Auto;
+        private bool _rowStriping = true;
+
+        /// <summary>True while the cursor is on the closed box.</summary>
+        private bool _isHovered;
 
         /// <summary>The metrics every row of this list is currently drawn with.</summary>
         private DropdownRowMetrics _metrics = DropdownRowMetrics.Menu;
@@ -272,6 +297,12 @@ namespace ModernVintageGUI.ControlTypes
             IsFocusable = true;
 
             Clicked += (sender, e) => Toggle();
+
+            // The box lights up under the cursor the way a button does. Without it the only
+            // thing saying "this opens something" is the arrow, and a control that does not
+            // react to the cursor at all reads as a read-only field.
+            Enter += (sender, e) => SetHovered(true);
+            Exit += (sender, e) => SetHovered(false);
         }
 
         #region Items and selection
@@ -316,64 +347,21 @@ namespace ModernVintageGUI.ControlTypes
         }
 
         /// <summary>
-        /// Works out which metrics this list is drawn with and hands them to every row, so a
-        /// list cannot end up with rows of two different heights.
+        /// Works out which metrics this list is drawn with and hands them, the banding and the
+        /// row numbers to every entry.
+        ///
+        /// All four are decisions a list makes *for* its rows - a row cannot count itself or
+        /// know whether any of its neighbours has an icon - and all four are shared with the
+        /// other list controls in <see cref="ListRowControl"/>, so a dropdown, a list view and a
+        /// tree cannot drift apart on them.
         /// </summary>
         private void ApplyRowStyle()
         {
-            _metrics = ResolveMetrics(_rowStyle, _items);
+            _metrics = ListRowControl.ResolveMetrics(_rowStyle, _items);
 
-            AlignIconColumns(_items, _metrics);
-
-            foreach (DropdownItem item in _items)
-            {
-                item.Metrics = _metrics;
-            }
-        }
-
-        private static DropdownRowMetrics ResolveMetrics(DropdownRowStyle style, IReadOnlyList<DropdownItem> items)
-        {
-            if (style == DropdownRowStyle.Menu)
-                return DropdownRowMetrics.Menu;
-
-            if (style == DropdownRowStyle.ItemList)
-                return DropdownRowMetrics.ItemList;
-
-            // Auto: a list of item stacks is an item list.
-            foreach (DropdownItem item in items)
-            {
-                if (item.Stack != null)
-                    return DropdownRowMetrics.ItemList;
-            }
-
-            return DropdownRowMetrics.Menu;
-        }
-
-        /// <summary>
-        /// One entry with an icon gives every entry the icon column, so the captions line up
-        /// instead of stepping in and out along the list - and an item list keeps the column
-        /// whether anything is in it or not.
-        /// </summary>
-        private static void AlignIconColumns(IReadOnlyList<DropdownItem> items, DropdownRowMetrics metrics)
-        {
-            bool column = metrics.AlwaysIconColumn;
-
-            if (!column)
-            {
-                foreach (DropdownItem item in items)
-                {
-                    if (item.HasIcon)
-                    {
-                        column = true;
-                        break;
-                    }
-                }
-            }
-
-            foreach (DropdownItem item in items)
-            {
-                item.ShowIconColumn = column;
-            }
+            ListRowControl.AlignIconColumns(_items, _metrics);
+            ListRowControl.NumberRows(_items, _rowStriping);
+            ListRowControl.ApplyMetrics(_items, _metrics);
         }
 
         /// <summary>
@@ -408,8 +396,9 @@ namespace ModernVintageGUI.ControlTypes
         {
             box.Children.Clear();
 
-            DropdownRowMetrics metrics = ResolveMetrics(style, items);
-            AlignIconColumns(items, metrics);
+            DropdownRowMetrics metrics = ListRowControl.ResolveMetrics(style, items);
+            ListRowControl.AlignIconColumns(items, metrics);
+            ListRowControl.NumberRows(items, striped: true);
 
             for (int i = 0; i < items.Count; i++)
             {
@@ -494,11 +483,20 @@ namespace ModernVintageGUI.ControlTypes
             // The list opens on the current selection, so Up and Down carry on from what the
             // player is looking at rather than from the top of the list.
             SelectedItem?.TakeFocus();
+
+            // The closed box draws itself differently while the list hangs under it - the arrow
+            // turns over - and it lives in another dialog than the list, so nothing would
+            // repaint it otherwise.
+            Dialog?.Refresh();
         }
 
         public void Close()
         {
+            if (!IsOpen)
+                return;
+
             _popup.Close();
+            Dialog?.Refresh();
         }
 
         public void Toggle()
@@ -623,39 +621,13 @@ namespace ModernVintageGUI.ControlTypes
         }
 
         /// <summary>
-        /// The width the widest of these entries needs, in author units. Shared with
-        /// <see cref="ItemTypeSelectorControl"/>, which opens the same kind of list.
+        /// The width the widest of these entries needs, in author units. Kept as the name a
+        /// caller already knows - <see cref="ItemTypeSelectorControl"/> opens the same kind of
+        /// list - over the shared measurement in <see cref="ListRowControl.MeasureWidth"/>.
         /// </summary>
         public static double MeasureItemWidth(IReadOnlyList<DropdownItem> items, DropdownRowMetrics metrics)
         {
-            if (items.Count == 0)
-                return 0;
-
-            var ruler = new TextLabelControl(
-                text: "",
-                fontName: GuiStyle.StandardFontName,
-                fontSize: FontSize,
-                orientation: TextOrientation.MiddleLeft,
-                padding: 0)
-            {
-                LayoutScale = 1.0
-            };
-
-            double widest = 0;
-
-            foreach (DropdownItem item in items)
-            {
-                ruler.Text = item.Text;
-                widest = Math.Max(widest, ruler.CalculateSize().X);
-            }
-
-            bool anyIcon = items[0].ShowIconColumn;
-
-            // What sits left of the caption, plus the same again on the right so the widest
-            // entry does not end flush against the frame.
-            double left = anyIcon ? metrics.TextLeft : metrics.TextLeftWithoutIcon;
-
-            return left + widest + metrics.TextLeftWithoutIcon;
+            return ListRowControl.MeasureWidth(items, metrics);
         }
         #endregion
 
@@ -753,6 +725,18 @@ namespace ModernVintageGUI.ControlTypes
             GuiElement.RoundRectangle(ctx, x, y, width, height, BoxCornerRadius);
             ctx.Fill();
 
+            // The cursor and the keyboard both lift the box, and the open list lifts it further
+            // still - so a dropdown whose list is hanging under it does not look inert while the
+            // player is reading the list.
+            double lift = HighlightAlpha();
+
+            if (lift > 0)
+            {
+                ctx.SetSourceRGBA(1.0, 1.0, 1.0, lift);
+                GuiElement.RoundRectangle(ctx, x, y, width, height, BoxCornerRadius);
+                ctx.Fill();
+            }
+
             VanillaDraw.EmbossRoundRectangle(ctx, x, y, width, height, inverse: true, depth: 1, radius: 1);
 
             DrawArrowButton(ctx, x, y, width, height);
@@ -760,6 +744,30 @@ namespace ModernVintageGUI.ControlTypes
             ctx.Restore();
 
             base.GenerateRenderData(surface, ctx);
+        }
+
+        /// <summary>
+        /// How much white is washed over the closed box: nothing at rest, a little for the
+        /// keyboard focus, more under the cursor, and most while the list is open.
+        /// </summary>
+        private double HighlightAlpha()
+        {
+            if (IsOpen)
+                return 0.14;
+
+            if (_isHovered)
+                return 0.09;
+
+            return HasKeyboardFocus ? 0.05 : 0.0;
+        }
+
+        private void SetHovered(bool hovered)
+        {
+            if (_isHovered == hovered)
+                return;
+
+            _isHovered = hovered;
+            Dialog?.Refresh();
         }
 
         private void DrawArrowButton(Context ctx, double x, double y, double width, double height)
@@ -791,12 +799,26 @@ namespace ModernVintageGUI.ControlTypes
             double left = right - UnscaledArrowWidth * LayoutScale;
 
             ctx.NewPath();
-            ctx.LineTo(left, top);
-            ctx.LineTo(right, top);
-            ctx.LineTo((left + right) / 2.0, bottom);
+
+            // It points at where the list is: down at a list that will open below, up at one
+            // that is already open. The player then never has to remember whether the last
+            // click opened or closed it.
+            if (IsOpen)
+            {
+                ctx.LineTo(left, bottom);
+                ctx.LineTo(right, bottom);
+                ctx.LineTo((left + right) / 2.0, top);
+            }
+            else
+            {
+                ctx.LineTo(left, top);
+                ctx.LineTo(right, top);
+                ctx.LineTo((left + right) / 2.0, bottom);
+            }
+
             ctx.ClosePath();
 
-            ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.6);
+            ctx.SetSourceRGBA(1.0, 1.0, 1.0, IsOpen || _isHovered ? 0.85 : 0.6);
             ctx.Fill();
         }
 
@@ -825,91 +847,17 @@ namespace ModernVintageGUI.ControlTypes
     /// <summary>
     /// One entry of a <see cref="DropdownControl"/>.
     ///
-    /// Built like a <see cref="ContextMenuItem"/> - a hover fill plus a label on the shared list
-    /// background, the way GuiElementListMenu draws its rows - with two additions: an icon
-    /// column, and the item tooltip that comes with an entry made from a stack.
+    /// A <see cref="ListRowControl"/> with two additions and nothing else: the payload the
+    /// caller wants back out of the selection, and the part that makes it an entry rather than
+    /// a row - clicking it picks it and closes the list it was opened from.
     /// </summary>
-    public class DropdownItem : UIControl, IItemTooltipSource
+    public class DropdownItem : ListRowControl
     {
-        #region Vanilla styling
-        private const int FontSize = 16;
-        private const double HoverAlpha = 0.5;
-
-        /// <summary>The selected row stays lit, but weaker than the one under the cursor.</summary>
-        private const double SelectedAlpha = 0.25;
-        #endregion
-
-        #region Properties
-        public string Text
-        {
-            get => _label.Text;
-            set => _label.Text = value;
-        }
-
         /// <summary>Whatever the caller wants to get back out of the selection.</summary>
         public object? Value { get; }
 
-        /// <summary>The stack this entry stands for, if it was built from one.</summary>
-        public ItemStack? Stack { get; }
-
-        /// <summary>A vanilla GUI icon name, for entries that are not items.</summary>
-        public string? IconName { get; }
-
-        /// <inheritdoc/>
-        public ItemSlot? TooltipSlot { get; }
-
-        /// <summary>True when this entry brings anything to put in the icon column.</summary>
-        public bool HasIcon => Stack != null || IconName != null;
-
         /// <summary>The dropdown this entry belongs to. Set when it is handed to SetItems.</summary>
         internal DropdownControl? OwnerDropdown { get; set; }
-
-        /// <summary>Whether the entries of this list reserve room for icons. Set by the owner.</summary>
-        internal bool ShowIconColumn
-        {
-            get => _showIconColumn;
-            set
-            {
-                if (_showIconColumn == value)
-                    return;
-
-                _showIconColumn = value;
-                RecomposeToMain();
-            }
-        }
-
-        /// <summary>
-        /// The measurements this row is drawn with. Set by the owning dropdown so every row of a
-        /// list agrees; an entry outside a list keeps the menu metrics.
-        /// </summary>
-        internal DropdownRowMetrics Metrics
-        {
-            get => _metrics;
-            set
-            {
-                _metrics = value;
-
-                // The stacking layout gives a child size + 2 x margin, so half the gap on each
-                // row is the gap between two of them - and half of it above the first and below
-                // the last, which is what the handbook list does too.
-                Margin = value.RowSpacing / 2.0;
-
-                RecomposeToMain();
-            }
-        }
-
-        /// <summary>Where the caption starts, in author units.</summary>
-        private double TextLeft => _showIconColumn ? _metrics.TextLeft : _metrics.TextLeftWithoutIcon;
-
-        public bool IsSelected { get; private set; }
-        #endregion
-
-        private readonly RectangleControl _hoverFill;
-        private readonly TextLabelControl _label;
-        private DropdownRowMetrics _metrics = DropdownRowMetrics.Menu;
-        private bool _showIconColumn;
-        private bool _isHovered;
-        private bool _isFocused;
 
         /// <summary>A plain text entry, optionally with one of the game's GUI icons.</summary>
         public DropdownItem(string text, object? value = null, string? iconName = null)
@@ -927,282 +875,24 @@ namespace ModernVintageGUI.ControlTypes
         }
 
         private DropdownItem(string text, object? value, string? iconName, ItemStack? stack)
-            : base(_Orientation: Orientation.None, _Margin: 0, _Padding: 0)
+            : base(text, iconName, stack)
         {
             Value = value;
-            IconName = iconName;
-            Stack = stack;
-
-            // A slot of its own rather than a borrowed one: the tooltip only reads the stack out
-            // of it, and an entry in a list does not belong to any inventory.
-            TooltipSlot = stack == null ? null : new DummySlot(stack);
-
-            _hoverFill = new RectangleControl(
-                borderWidth: 0,
-                borderColor: ElementColor.Transparent,
-                backgroundColor: HoverColor(0.0),
-                _Name: text + "_hover",
-                _Margin: 0,
-                _Padding: 0);
-
-            _label = new TextLabelControl(
-                text: text,
-                fontName: GuiStyle.StandardFontName,
-                fontSize: FontSize,
-                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
-                orientation: TextOrientation.MiddleLeft,
-                padding: 0,
-                _Name: text + "_label",
-                _Margin: 0,
-                _Padding: 0);
-
-            Children.Add(_hoverFill);
-            Children.Add(_label);
-
-            IsFocusable = true;
-
-            Enter += OnEnter;
-            Exit += OnExit;
-            Clicked += OnClicked;
-            GotFocus += OnGotFocus;
-            LostFocus += OnLostFocus;
-        }
-
-        private static ElementColor HoverColor(double alpha)
-        {
-            var color = new ElementColor(GuiStyle.DialogHighlightColor);
-            color.A = (byte)(alpha * 255);
-            return color;
-        }
-
-        internal void SetSelected(bool selected)
-        {
-            if (IsSelected == selected)
-                return;
-
-            IsSelected = selected;
-            UpdateHighlight();
-        }
-
-        internal void TakeFocus()
-        {
-            Dialog?.FocusControl(this);
-        }
-
-        #region Layout
-        /// <summary>
-        /// An entry is an atomic hit target. Without this the hit test would descend into the
-        /// label or the highlight, and those would take the Enter, Exit and Clicked meant for
-        /// the entry - so it would never light up, never show a tooltip and never fire.
-        /// </summary>
-        protected override UIControl? HitTestRecursive(UIControl control, double localX, double localY)
-        {
-            return control.ContainsLocalPoint(localX, localY) ? control : null;
-        }
-
-        public override PointD CalculateSize()
-        {
-            foreach (UIControl child in Children)
-            {
-                child.CalculateSize();
-            }
-
-            PointD measured = new PointD(
-                _label.Size.X + TextLeft * LayoutScale,
-                Math.Max(_label.Size.Y, _metrics.RowHeight * LayoutScale));
-
-            CalculatedSize = measured;
-            SetLayoutSize(measured);
-
-            StretchParts();
-
-            return measured;
-        }
-
-        public override void NormalizeChildrenByDelta()
-        {
-            StretchParts();
-            base.NormalizeChildrenByDelta();
-        }
-
-        public override void CalculateAllPositions()
-        {
-            base.CalculateAllPositions();
-            StretchParts();
-        }
-
-        private void StretchParts()
-        {
-            // The highlight covers the whole row and the gap around it, icon column included.
-            //
-            // The bleed into the gap is what makes an item row work: a stack is not drawn at the
-            // size it is asked for - a block's cube reaches past it - so a band that stopped at
-            // the row would have icons hanging over its edge. Every row takes half the gap on
-            // each side, so two lit rows meet exactly and never overlap.
-            double bleed = ScaledMargin;
-
-            _hoverFill.SetLayoutSize(new PointD(Size.X + bleed * 2, Size.Y + bleed * 2));
-            _hoverFill.Position = new PointD(Position.X - bleed, Position.Y - bleed);
-
-            double textLeft = TextLeft * LayoutScale;
-
-            _label.SetLayoutSize(new PointD(Math.Max(0, Size.X - textLeft), Size.Y));
-            _label.Position = new PointD(Position.X + textLeft, Position.Y);
-        }
-        #endregion
-
-        #region Rendering
-        public override void GenerateRenderData(ImageSurface surface, Context ctx)
-        {
-            base.GenerateRenderData(surface, ctx);
-
-            // A named GUI icon is Cairo and belongs in the surface; a stack cannot be and is
-            // drawn per frame in GenerateInteractiveRenderData.
-            if (IconName == null || !_showIconColumn)
-                return;
-
-            ICoreClientAPI? api = Dialog?.Api;
-            if (api == null)
-                return;
-
-            double size = _metrics.IconSize * LayoutScale;
-
-            api.Gui.Icons.DrawIcon(
-                ctx,
-                IconName,
-                Position.X + _metrics.IconLeft * LayoutScale,
-                Position.Y + (Size.Y - size) / 2.0,
-                size,
-                size,
-                GuiStyle.DialogDefaultTextColor);
-        }
-
-        public override void GenerateInteractiveRenderData(ICoreClientAPI api, float deltaTime)
-        {
-            base.GenerateInteractiveRenderData(api, deltaTime);
-
-            if (!_showIconColumn)
-                return;
-
-            RenderIconAt(api, deltaTime, GetScreenPosition(), Size.Y, Dialog?.SurfaceRenderZ ?? 0, LayoutScale);
         }
 
         /// <summary>
-        /// Draws the stack in the icon column of a row that starts at <paramref name="origin"/>.
-        /// Also used by the dropdown itself for the closed box, which shows the icon of the
-        /// current selection without owning a copy of this entry.
+        /// A dropdown list is open because the player is picking from it, so the row under the
+        /// cursor is the row Enter should take - which is what moving the focus with the cursor
+        /// means here.
         /// </summary>
-        /// <summary>
-        /// How big a stack may be drawn in a row of this height.
-        ///
-        /// A stack is not drawn at the size it is given: the model is projected into the box and
-        /// a long item - a wand, a spear - or the corner of a block cube reaches well past it.
-        /// The game's own answer to "what fits in a box of height H" is the inventory slot,
-        /// which draws its stack at 25.6 in a 48 box, so that ratio is used here rather than an
-        /// absolute size. A row is then free to be any height and the icon still fits in it.
-        /// </summary>
-        private static double StackSizeFor(double rowHeight)
+        protected override bool FollowsCursorWithFocus => true;
+
+        protected override void OnActivated(MouseEventArgs e)
         {
-            return rowHeight * (ItemSlotControl.UnscaledItemSize / ItemSlotControl.UnscaledSlotSize);
-        }
-
-        /// <param name="layoutScale">
-        /// The scale of the tree that is drawing, not this entry's own. They are the same in the
-        /// open list and they are not in the closed box: until the list has been opened once the
-        /// entries hang off no dialog at all, so their LayoutScale is still the default 1 while
-        /// the dialog around the box is at whatever the GUI slider says.
-        /// </param>
-        internal void RenderIconAt(
-            ICoreClientAPI api,
-            float deltaTime,
-            PointD origin,
-            double rowHeight,
-            float surfaceZ,
-            double layoutScale)
-        {
-            if (TooltipSlot?.Itemstack == null)
-                return;
-
-            double size = StackSizeFor(rowHeight);
-
-            // Centred in the strip that was left for it - the same strip the caption is indented
-            // by, so icon and text cannot collide however the row is sized.
-            double strip = (_showIconColumn ? _metrics.TextLeft : 0) * layoutScale;
-
-            api.Render.RenderItemstackToGui(
-                TooltipSlot,
-                origin.X + strip / 2.0,
-                origin.Y + rowHeight / 2.0,
-                surfaceZ + CustomDialogElement.SlotItemZOffset,
-                (float)size,
-                ColorUtil.WhiteArgb,
-                deltaTime,
-                shading: true,
-                rotate: false,
-
-                // An entry stands for a *type*, not for an amount - the handbook list leaves the
-                // number off for the same reason, and a "1" printed on every row is noise.
-                showStackSize: false);
-        }
-        #endregion
-
-        #region Interaction
-        /// <summary>
-        /// Hover, keyboard focus and selection are three independent reasons for a row to be
-        /// lit, and a row can be in all three - so they are tracked apart and the strongest one
-        /// decides the alpha. Writing the colour straight from the Enter handler would mean the
-        /// cursor leaving a row unlights the one the keyboard or the selection is on.
-        /// </summary>
-        private void UpdateHighlight()
-        {
-            double alpha =
-                _isHovered || _isFocused ? HoverAlpha :
-                IsSelected ? SelectedAlpha : 0.0;
-
-            _hoverFill.BackgroundColor = HoverColor(alpha);
-            Dialog?.Refresh();
-        }
-
-        private void OnEnter(object? sender, MouseEventArgs e)
-        {
-            _isHovered = true;
-            UpdateHighlight();
-
-            // The tooltip of the game, for an entry that stands for an item.
-            ItemTooltip.Announce(Dialog?.Api, TooltipSlot, entered: true);
-
-            // Hovering moves the keyboard selection too, the way menus work everywhere -
-            // otherwise Enter picks the row the player is not looking at.
-            Dialog?.FocusControl(this);
-        }
-
-        private void OnExit(object? sender, MouseEventArgs e)
-        {
-            _isHovered = false;
-            UpdateHighlight();
-
-            ItemTooltip.Announce(Dialog?.Api, TooltipSlot, entered: false);
-        }
-
-        private void OnGotFocus(object? sender, EventArgs e)
-        {
-            _isFocused = true;
-            UpdateHighlight();
-        }
-
-        private void OnLostFocus(object? sender, EventArgs e)
-        {
-            _isFocused = false;
-            UpdateHighlight();
-        }
-
-        private void OnClicked(object? sender, MouseEventArgs e)
-        {
-            // The tooltip belongs to a row that is about to disappear with the list.
+            // The tooltip belongs to an entry that is about to disappear with the list.
             ItemTooltip.Announce(Dialog?.Api, TooltipSlot, entered: false);
 
             OwnerDropdown?.OnItemPicked(this);
         }
-        #endregion
     }
 }

@@ -66,10 +66,15 @@ in game, so it cannot show a screen that no longer exists.*
   an item stack, drawn from the item atlas with its own shader - is drawn on top per frame, the
   same split the vanilla GUI makes
 
+* **One kind of list row.** A dropdown entry, a list view row and a tree node are the same control
+  underneath (`ListRowControl`), so the banding, the hover, the icon column and the item tooltip
+  are decided once rather than three times - and a list, a tree and a menu read as one family
+
 **Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
 `TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`, `DropdownControl`,
 `ItemTypeSelectorControl`, `CheckboxControl`, `TextInputControl`, `ProgressBarControl`,
-`TabsControl`, `ImageControl`, `ColorPickerControl`, `PixelCanvasControl`.
+`TabsControl`, `ImageControl`, `ColorPickerControl`, `PixelCanvasControl`, `ListViewControl`,
+`ItemListViewControl`, `DetailViewControl`, `TreeViewControl`.
 
 <h2>What is still ongoing</h2>
 
@@ -270,6 +275,12 @@ A list built from item stacks draws itself like the handbook's Blocks and Items 
 the game's item tooltip with it. `MaxVisibleItems` and `MaxListHeight` decide when it starts
 scrolling - both unlimited by default, and the list is always cut down to what fits on screen.
 
+The rows are banded and separated by a hairline, and the picked one keeps a bar on its leading
+edge - so "where the cursor is" and "what is picked" stay two different things to look at while
+the list scrolls past. `RowStriping = false` turns the banding off for a list of two or three
+rows, where it is a pattern without a job. The closed box lifts under the cursor and its arrow
+turns over while the list is open.
+
 For picking an item *type* rather than holding an item there is a control that looks like a slot
 and opens the same list:
 
@@ -279,6 +290,84 @@ selector.SelectedItemType;                                  // ItemStack?
 selector.SelectedCode;                                      // AssetLocation?
 ItemTypeSelectorControl.CollectVariants(capi, code);        // every variant of one thing
 ```
+
+<h2>Lists, details and trees</h2>
+
+A dropdown's list exists only while it is open. A list view stands on the dialog and is the thing
+the player works in - it scrolls, it keeps one row picked, and clicking a row folds its details
+out *under that row*, the way a DataGrid shows row details:
+
+```csharp
+var list = new ListViewControl { Size = new PointD(200, 150), IsAutoSize = false };
+
+list.SetItems(new[] {
+    new ListViewItem("Granite", value: "granite") {
+        Secondary   = "hard",                           // the right hand column
+        Description = "A coarse grained rock.",         // the paragraph in the panel
+        Details     = { new DetailEntry("Layer", "Deep") }
+    },
+    new ListViewItem("Chalk", value: "chalk") { Secondary = "soft" }
+});
+
+list.SelectionChanged += (s, e) => capi.ShowChatMessage(e.Value?.ToString());
+```
+
+<img src="docs/images/readme-list-view.png" alt="A list of rocks with a second column, the first row picked and its detail panel folded out under it, pushing the rows below it down" />
+
+The panel is an ordinary child of the list sitting between two rows, so it pushes what is below
+it down, scrolls with the rows and is clipped at the same edge - nothing floats over anything.
+Clicking another row moves it there, clicking the open row again folds it back in
+(`ToggleDetailsOnReclick = false` keeps the DataGrid's own rule, where the details only ever
+change rows and never close).
+
+`DetailView` is the panel itself, and `DetailMode` decides where it goes:
+
+* `Inline` - the default, shown above: inside the list, under the picked row
+* `Attached` - you place `list.DetailView` in your own tree instead, beside the list or on
+  another tab, and the list only fills it. For a master-detail screen where the panel stands
+  still while the list is browsed
+* `None` - nothing folds out. `SelectionChanged` and `ItemActivated` still fire
+
+```csharp
+list.ShowDetails(list.Items[0]);   // fold a row out from code
+list.CloseDetails();               // and back in
+list.AreDetailsOpen;               // whether anything is folded out
+```
+
+`ItemListViewControl` is the same list for item stacks: handbook row style, the game's item
+tooltip on every row, and details that describe the picked item with the game's own words rather
+than with text you typed a second time.
+
+```csharp
+var items = new ItemListViewControl { Size = new PointD(230, 160), IsAutoSize = false };
+items.SetStacks(stacks);            // or SetCollectibles(...)
+items.SelectedStack;                // ItemStack?
+items.SelectedCode;                 // AssetLocation?
+```
+
+A tree is a list whose rows fold out. The nodes are data, not controls - the rows are made from
+whatever is visible right now, so a tree of ten thousand nodes with three of them open costs three
+rows:
+
+```csharp
+var tree = new TreeViewControl { Size = new PointD(200, 190), IsAutoSize = false };
+
+TreeNode rocks = tree.AddNode("Rocks");
+rocks.Add("Granite", value: "rock-granite");
+rocks.Add("Chalk",   value: "rock-chalk");
+rocks.Expand();
+
+tree.SelectionChanged += (s, e) => capi.ShowChatMessage(e.Node?.Text);
+```
+
+<img src="docs/images/readme-tree-view.png" alt="A tree with a branch open inside another branch, one node picked and one hovered" />
+
+Clicking the triangle folds a branch, clicking anywhere else picks the node. From the keyboard,
+Right folds out, Left folds in and then walks to the parent, and Up and Down are the dialog's own
+focus movement - which in a tree is exactly the visible rows in exactly the right order.
+
+All three scroll the way every container here does, by implementing `IScrollable`: a wheel tick,
+a drag on the vanilla scrollbar, and clipping at the viewport edge.
 
 <h2>Icons</h2>
 

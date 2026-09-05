@@ -159,6 +159,33 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "list-view",
+                Description = "A list view with the details of the picked row folded out under "
+                            + "it, the way a DataGrid shows row details: the rows below are "
+                            + "pushed down, and the third row is hovered.",
+                Build = BuildListView
+            };
+
+            yield return new Scenario
+            {
+                Name = "item-list-view",
+                Description = "The same control in the handbook's row style, which is what a "
+                            + "list of item stacks takes. The icon column is empty here because "
+                            + "rendering a stack needs the game's item atlas.",
+                Build = BuildItemListView
+            };
+
+            yield return new Scenario
+            {
+                Name = "tree-view",
+                Description = "A tree with one branch folded out and a branch inside it, one "
+                            + "node picked and one hovered - the indent, the expander and the "
+                            + "row states in one picture.",
+                Build = BuildTreeView
+            };
+
+            yield return new Scenario
+            {
                 Name = "stretched-label",
                 Description = "A label inside a vertically stacked panel. Normalization stretches " +
                               "it to the full content width; the next measure pass must still " +
@@ -614,6 +641,142 @@ namespace LayoutHarness
             // exactly the two sides the clip cuts hardest. If the grid ever stops leaving room
             // for it, this picture shows a highlight with a flat top and a flat left side.
             grid.Slots[6].InvokeEventEnter(new MouseEvent(0, 0));
+
+            return root;
+        }
+
+        /// <summary>
+        /// A list view with the details of one row folded out under it - the row details of a
+        /// DataGrid, and the case the whole inline panel exists for: the rows below it have to
+        /// be pushed down, and the panel has to be scrolled and clipped with them.
+        ///
+        /// Both states that matter are produced by the real handlers: the fold through the
+        /// control's own ShowDetails, the hover through the Enter event.
+        /// </summary>
+        private static RectangleControl BuildListView()
+        {
+            RectangleControl root = CreateRoot();
+
+            var list = new ListViewControl(_Name: "listView")
+            {
+                Size = new PointD(230, 260),
+                IsAutoSize = false
+            };
+
+            list.SetItems(new[]
+            {
+                new ListViewItem("Granite", value: "granite")
+                {
+                    Secondary = "hard",
+                    Description = "A coarse grained rock, common in the deeper layers.",
+                    Details =
+                    {
+                        new DetailEntry("Layer", "Deep"),
+                        new DetailEntry("Tool", "Pickaxe")
+                    }
+                },
+                new ListViewItem("Andesite", value: "andesite") { Secondary = "hard" },
+                new ListViewItem("Chalk", value: "chalk") { Secondary = "soft" },
+                new ListViewItem("Basalt", value: "basalt") { Secondary = "hard" },
+                new ListViewItem("Limestone", value: "limestone") { Secondary = "soft" }
+            });
+
+            list.DetailView.Name = "detailView";
+
+            list.ShowDetails(list.Items[0]);
+
+            // The hover goes through the real Enter handler rather than through a colour set by
+            // hand, so this shows what the game would draw.
+            list.Items[2].InvokeEventEnter(new MouseEvent(0, 0));
+
+            root.Children.Add(list);
+
+            // Scrolled a little, which is the part that has to be right: the folded out panel is
+            // a child of the list like the rows are, so it has to move with them and be cut at
+            // the same edge. ScrollTo clamps against the content, which is only known after a
+            // layout pass.
+            root.PerformLayout();
+            list.ScrollTo(0, list.MaxScrollOffset.Y / 3);
+
+            return root;
+        }
+
+        /// <summary>
+        /// The item flavoured list. Without a client there are no stacks, so the rows are given
+        /// as captions - the row style is forced to the handbook's either way, which is the half
+        /// this picture is about.
+        /// </summary>
+        private static RectangleControl BuildItemListView()
+        {
+            RectangleControl root = CreateRoot();
+
+            var list = new ItemListViewControl(_Name: "itemListView")
+            {
+                DetailMode = ListViewDetailMode.None,
+                Size = new PointD(230, 160),
+                IsAutoSize = false
+            };
+
+            list.SetItems(new[]
+            {
+                new ListViewItem("Jam"),
+                new ListViewItem("Meat Stew"),
+                new ListViewItem("Porridge"),
+                new ListViewItem("Scrambled Eggs"),
+                new ListViewItem("Bread")
+            });
+
+            list.Select(1);
+            list.Items[3].InvokeEventEnter(new MouseEvent(0, 0));
+
+            root.Children.Add(list);
+            return root;
+        }
+
+        /// <summary>
+        /// A tree with a branch inside a branch, so the indent has two levels to show, and with
+        /// the fold driven through the real Expand rather than by building the rows by hand.
+        /// </summary>
+        private static RectangleControl BuildTreeView()
+        {
+            RectangleControl root = CreateRoot();
+
+            var tree = new TreeViewControl(_Name: "treeView")
+            {
+                Size = new PointD(210, 190),
+                IsAutoSize = false
+            };
+
+            TreeNode rocks = tree.AddNode("Rocks");
+            rocks.Add("Granite", "rock-granite");
+            rocks.Add("Andesite", "rock-andesite");
+
+            TreeNode soft = rocks.Add("Soft", "rock-soft");
+            soft.Add("Chalk", "rock-chalk");
+            soft.Add("Limestone", "rock-limestone");
+
+            TreeNode wood = tree.AddNode("Wood");
+            wood.Add("Oak", "log-oak");
+            wood.Add("Birch", "log-birch");
+
+            tree.AddNode("Loose ends");
+
+            rocks.Expand();
+            soft.Expand();
+
+            tree.SelectByValue("rock-chalk");
+
+            root.Children.Add(tree);
+
+            // The second visible row - Granite - under the cursor, through the real handler.
+            foreach (UIControl child in tree.Children)
+            {
+                if (child is TreeNodeRowControl row && row.Node.Text == "Granite")
+                {
+                    row.InvokeEventEnter(new MouseEvent(0, 0));
+                    break;
+                }
+            }
 
             return root;
         }

@@ -139,6 +139,8 @@ namespace LayoutHarness
             yield return ("readme-title-bar", BuildTitleBar());
             yield return ("readme-context-menu", BuildContextMenu(hovered: false));
             yield return ("readme-context-menu-hover", BuildContextMenu(hovered: true));
+            yield return ("readme-list-view", BuildListView());
+            yield return ("readme-tree-view", BuildTreeView());
             yield return ("readme-showcase", BuildShowcase());
             yield return ("readme-keyboard-focus", BuildKeyboardFocus());
             yield return ("readme-runtime-before", BuildRuntimeEdit(added: false));
@@ -324,6 +326,89 @@ namespace LayoutHarness
             }
 
             root.Children.Add(stack);
+            return root;
+        }
+
+        /// <summary>
+        /// A list with the details of one row folded out under it. Both states are driven
+        /// through the real handlers - the fold through ShowDetails, the hover through Enter.
+        /// </summary>
+        private static UIControl BuildListView()
+        {
+            RectangleControl root = CreateDialogRoot();
+
+            var list = new ListViewControl(_Name: "listView")
+            {
+                Size = new PointD(230, 265),
+                IsAutoSize = false
+            };
+
+            list.SetItems(new[]
+            {
+                new ListViewItem("Granite", value: "granite")
+                {
+                    Secondary = "hard",
+                    Description = "A coarse grained rock, common in the deeper layers.",
+                    Details =
+                    {
+                        new DetailEntry("Layer", "Deep"),
+                        new DetailEntry("Tool", "Pickaxe")
+                    }
+                },
+                new ListViewItem("Andesite", value: "andesite") { Secondary = "hard" },
+                new ListViewItem("Chalk", value: "chalk") { Secondary = "soft" },
+                new ListViewItem("Basalt", value: "basalt") { Secondary = "hard" },
+                new ListViewItem("Limestone", value: "limestone") { Secondary = "soft" }
+            });
+
+            list.ShowDetails(list.Items[0]);
+
+            list.Items[2].InvokeEventEnter(new MouseEvent(0, 0));
+
+            root.Children.Add(list);
+
+            return root;
+        }
+
+        /// <summary>A tree with a branch inside a branch, one node picked and one hovered.</summary>
+        private static UIControl BuildTreeView()
+        {
+            RectangleControl root = CreateDialogRoot();
+
+            var tree = new TreeViewControl(_Name: "treeView")
+            {
+                Size = new PointD(200, 190),
+                IsAutoSize = false
+            };
+
+            TreeNode rocks = tree.AddNode("Rocks");
+            rocks.Add("Granite", "rock-granite");
+            rocks.Add("Andesite", "rock-andesite");
+
+            TreeNode soft = rocks.Add("Soft", "rock-soft");
+            soft.Add("Chalk", "rock-chalk");
+            soft.Add("Limestone", "rock-limestone");
+
+            TreeNode wood = tree.AddNode("Wood");
+            wood.Add("Oak", "log-oak");
+            wood.Add("Birch", "log-birch");
+
+            rocks.Expand();
+            soft.Expand();
+
+            tree.SelectByValue("rock-chalk");
+
+            root.Children.Add(tree);
+
+            foreach (UIControl child in tree.Children)
+            {
+                if (child is TreeNodeRowControl row && row.Node.Text == "Granite")
+                {
+                    row.InvokeEventEnter(new MouseEvent(0, 0));
+                    break;
+                }
+            }
+
             return root;
         }
 
