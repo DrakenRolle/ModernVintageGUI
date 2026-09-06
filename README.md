@@ -70,6 +70,20 @@ in game, so it cannot show a screen that no longer exists.*
   underneath (`ListRowControl`), so the banding, the hover, the icon column and the item tooltip
   are decided once rather than three times - and a list, a tree and a menu read as one family
 
+* **Alignment across the stack.** A container decides which way it stacks; each control decides
+  where it sits across that - stretched, at either end, or centred. Along the stacking direction
+  there is nothing to decide, so a value naming that axis is read as "stretch" rather than as a
+  contradiction
+* **Hiding and disabling** on every control, and they are different on purpose: hiding collapses
+  and closes the gap, disabling keeps the place and washes the control out. Both inherit downwards
+  without touching what the children asked for, both take the control out of the tab order and out
+  of the mouse's reach, and both take the keyboard focus with them if it was there
+* **Layout properties invalidate themselves.** Assigning `Size`, `Margin`, `Padding`, `MaxSize`,
+  `Orientation`, `ClipsChildren` or `IsVisible` on an open dialog re-runs the layout and redraws it;
+  `IsEnabled` redraws. Which properties do that is a list rather than "everything that notifies",
+  because the arrange pass writes `Position` and a rule that invalidated on any change would make
+  the layout re-enter itself forever - the harness checks that a layout pass writes none of them
+
 **Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
 `TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`, `DropdownControl`,
 `ItemTypeSelectorControl`, `CheckboxControl`, `TextInputControl`, `ProgressBarControl`,
@@ -78,16 +92,22 @@ in game, so it cannot show a screen that no longer exists.*
 
 <h2>What is still ongoing</h2>
 
-* `Orientation` (a control's own alignment) is inert, and `Orientation.Fill` is not implemented
 * Redraw invalidation - every hover state change still redraws the whole surface. On the showcase
-  that is ~9 ms at GUI scale 1 and ~19 ms at scale 2, most of it now the text. The way out is the
-  one vanilla takes and `ItemSlotControl` already takes here: compose an element once into a
-  surface of its own and blit it. Measure before you guess - see `--profile`
+  that is ~9 ms at GUI scale 1 and ~19 ms at scale 2: 3.8 ms of it the 67 text labels and 2.1 ms
+  the emboss blur behind the 14 buttons. The way out is the one vanilla takes and `ItemSlotControl`
+  already takes here: compose an element once into a surface of its own and blit it. Measure before
+  you guess - see `--profile`
+* No serialisation. The JSON or XML export in the goals above does not exist yet, and neither does
+  the runtime loader a designer file would need
 * Re-centering on window resize
 * XAML editor or custom UI designer
-* More styling options (custom backgrounds, fonts)
-* Text field extras - selecting a range, cut and paste, and a blinking caret
+* More styling options (custom backgrounds, fonts) - font name and size are decided per control
+  today, with no theme to change them in one place
+* Text field extras - selecting a range, cut and paste, a blinking caret, and placing the caret
+  with the mouse
 * Edge drag resize window
+* No `MinSize`, no gap between a container's children other than each child's own margin, and no
+  grid layout - stacking and overlay are the only two
 
 <h1>Getting started</h1>
 
@@ -156,6 +176,33 @@ dialog.Children.Add(row);
 Controls of different kinds mix freely in one row:
 
 <img src="docs/images/readme-mixed-row.png" alt="A button, a text label and another button in one row" />
+
+<h3>Across the stack</h3>
+
+`InsideOrientation` says which way a container stacks. A control's own `Orientation` says where it
+sits *across* that direction - so in a column it is horizontal, and in a row it is vertical:
+
+```csharp
+column.Children.Add(new ButtonControl { Text = "Fill - the default" });
+column.Children.Add(new ButtonControl { Text = "Left",   Orientation = Orientation.Left });
+column.Children.Add(new ButtonControl { Text = "Center", Orientation = Orientation.Center });
+column.Children.Add(new ButtonControl { Text = "Right",  Orientation = Orientation.Right });
+```
+
+<img src="docs/images/readme-cross-axis.png" alt="Four buttons in a column: one stretched across it, one at the left, one centred and one at the right" />
+
+`Fill` is the default and stretches the control across the container, which is what everything did
+before there was a choice. The other three leave it at its natural size and pick an end - and
+`Right` puts its trailing edge exactly where the stretched one ends, so a right aligned button under
+a stretched row lines up rather than nearly lines up.
+
+Along the stacking direction this says nothing, because the order of the children already decides
+that. `Top` in a column and `Left` in a row therefore read as `Fill` rather than as a contradiction,
+and so does anything in an overlay container, which stacks in no direction at all.
+
+> Note for `TextLabelControl`: where the *text* sits inside the label is `TextAlign`. It used to be
+> called `Orientation` too, which hid the one above and made a label the one control that could not
+> be aligned in its container.
 
 <h2>Keyboard</h2>
 
@@ -403,16 +450,55 @@ a gallery of them under the "Icons" tab, because a name does not tell you what a
 <h2>Editing the UI after it was opened</h2>
 
 Adding or removing a child relays out and redraws the dialog it belongs to. You do not have to close
-and reopen anything. Property changes are not observed yet, so ask for a redraw yourself after those.
+and reopen anything. The layout properties of `UIControl` do the same: assigning `Size`, `Margin`,
+`Padding`, `MaxSize`, `Orientation`, `InsideOrientation`, `ClipsChildren` or `IsVisible` asks for a
+new layout pass, and `IsEnabled` for a redraw. Nothing else is observed - a control's own properties
+are plain fields, so a label's text still needs the redraw asked for by hand.
 
 ```csharp
 row.Children.Add(new ButtonControl { Text = "Added at runtime" });
-myLabel.Text = "Hey don't touch my fancy Text!";
+saveButton.Margin = 8;                              // relays out on its own
+
+myLabel.Text = "Hey don't touch my fancy Text!";     // this one does not
 dialog.Refresh();
 ```
 
 <img src="docs/images/readme-runtime-before.png" alt="A row with two buttons" />
 <img src="docs/images/readme-runtime-after.png" alt="The same row with a third, wider button appended" />
+
+<h2>Hiding and disabling</h2>
+
+Every control has the two states, and they are deliberately different things:
+
+```csharp
+saveButton.IsEnabled = false;    // still there, washed out, takes no input
+advancedPanel.IsVisible = false; // gone, and the row closes up behind it
+```
+
+**Hiding collapses.** An invisible control is not measured, takes no space in its parent's stack,
+is not drawn, cannot be clicked and is not in the tab order - the same rule WinForms uses, and the
+one a stacking layout wants: a row that hides its third button should close up rather than leave a
+hole. Reserve space with an empty `RectangleControl` of a fixed size if you want the hole.
+
+**Disabling does not.** A disabled control keeps its place and is drawn under a wash of the dialog
+background, so the dialog does not change shape under the player's cursor. It receives no mouse
+events and never hovers, but it still swallows the click that lands on it rather than letting it
+through to whatever is behind.
+
+Both are inherited downwards, and both leave the children's own values alone - so switching a panel
+back on restores exactly the state it had rather than a flattened one:
+
+```csharp
+panel.IsEnabled = false;
+someButtonInIt.IsEnabled;             // still true - its own wish
+someButtonInIt.IsEffectivelyEnabled;  // false - what input and focus actually ask
+```
+
+Focus is kept honest along with it. Hiding or disabling the focused control takes the focus off it
+on the next layout pass, because leaving it there would strand the keyboard: the control is out of
+the tab order, so Tab could not move away from it either.
+
+<img src="docs/images/readme-enabled-hidden.png" alt="Three rows: one with the middle control disabled and keeping its place, one with it hidden and the row closed up, and one where the whole container is disabled" />
 
 <h2>GUI scale</h2>
 
@@ -434,6 +520,12 @@ idempotence over five passes, that nothing collapsed to zero, that no siblings o
 container, that laying out at 1.5x and 2x gives the same design that much larger, and that a tree
 reused across a scale change matches a freshly built one. Add a scenario in `Scenarios.cs` whenever
 you add a control.
+
+On top of the per scenario invariants it checks the rules that are not about one tree: the tab
+order, clipping, scrolling, size caps, the pixel canvas, the four cross axis alignments on both
+axes and at two GUI scales, that hiding collapses while disabling does not and that neither can be
+reached by Tab or by the mouse, and that a layout pass writes no property that would ask for another
+layout pass.
 
 Every picture in this README is rendered by the same harness through the real drawing code, so they
 can be regenerated instead of re-screenshotted:

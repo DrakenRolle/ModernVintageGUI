@@ -31,7 +31,15 @@ namespace IS2Mod.ControlTypes
         public FontWeight FontWeight { get; set; }
         public FontSlant FontSlant { get; set; }
         public ElementColor TextColor { get; set; }
-        public new TextOrientation Orientation { get; set; }
+        /// <summary>
+        /// Where the text sits inside the label's own box.
+        ///
+        /// Not to be confused with <see cref="UIControl.Orientation"/>, which is where the label
+        /// itself sits inside its parent - this used to be called Orientation as well and hid
+        /// that one, which meant a label was the one control that could not be aligned in its
+        /// container. Two different questions, two different names.
+        /// </summary>
+        public TextOrientation TextAlign { get; set; }
         public bool WordWrap { get; set; }
         public int LineHeight { get; set; }
         #endregion
@@ -62,7 +70,7 @@ namespace IS2Mod.ControlTypes
             FontWeight = fontWeight;
             FontSlant = fontSlant;
             TextColor = textColor ?? ElementColor.White;
-            Orientation = orientation;
+            TextAlign = orientation;
             WordWrap = wordWrap;
             LineHeight = lineHeight;
             Padding = padding;
@@ -76,7 +84,7 @@ namespace IS2Mod.ControlTypes
             FontWeight = FontWeight.Normal;
             FontSlant = FontSlant.Normal;
             TextColor = ElementColor.Black;
-            Orientation = TextOrientation.Left;
+            TextAlign = TextOrientation.Left;
             WordWrap = false;
             LineHeight = 20;
             Padding = 5;
@@ -365,14 +373,71 @@ namespace IS2Mod.ControlTypes
 
         private void DrawSingleLineText(Context ctx)
         {
-            TextExtents te = ctx.TextExtents(Text);
-            Cairo.FontExtents fe = ctx.FontExtents;
+            EnsureExtents(ctx);
 
-            (double x, double y) = GetTextPosition(te, fe, CapHeightCached(ctx));
+            (double x, double y) = GetTextPosition(_glyphExtents, _lineExtents, CapHeightCached(ctx));
 
             ctx.MoveTo(x, y);
             ctx.ShowText(Text);
         }
+
+        #region Draw metrics cache
+        // Everything the glyph metrics depend on, as of the last time they were taken. The box
+        // the label sits in is deliberately not in here: the box decides where the text goes,
+        // which is arithmetic, not where the glyphs are relative to the baseline, which is the
+        // expensive part.
+        private string? _extentsText;
+        private string? _extentsFontName;
+        private double _extentsFontSize;
+        private FontWeight _extentsWeight;
+        private FontSlant _extentsSlant;
+        private TextExtents _glyphExtents;
+        private Cairo.FontExtents _lineExtents;
+        private bool _hasExtents;
+
+        /// <summary>
+        /// Takes the glyph and line metrics of the current text, or reuses the ones already
+        /// taken.
+        ///
+        /// <c>Context.TextExtents</c> is not a lookup, it shapes the string - and it was being
+        /// called once per label on every redraw, which is every time anything in the dialog is
+        /// hovered. On the showcase that was 1.5 of the 9.6 ms a redraw cost, asked 71 times for
+        /// 71 answers that had not changed since the dialog was opened. Drawing the glyphs
+        /// afterwards costs about the same again, and that part is real work.
+        ///
+        /// Cached per label rather than in a table keyed by the string, because a label that
+        /// does change its text - a counter - would otherwise fill that table up forever.
+        /// </summary>
+        private void EnsureExtents(Context ctx)
+        {
+            if (_hasExtents
+                && _extentsFontSize == ScaledFontSize
+                && _extentsWeight == FontWeight
+                && _extentsSlant == FontSlant
+                && string.Equals(_extentsText, Text, StringComparison.Ordinal)
+                && string.Equals(_extentsFontName, FontName, StringComparison.Ordinal))
+            {
+                IS2Mod.Diagnostics.UIProfiler.Count("text   extents (cached)");
+                return;
+            }
+
+            IS2Mod.Diagnostics.UIProfiler.Scope scope = IS2Mod.Diagnostics.UIProfiler.Begin();
+
+            // The font has to be selected on this context already - SetupFont runs first, and
+            // these two answers are about that font.
+            _glyphExtents = ctx.TextExtents(Text);
+            _lineExtents = ctx.FontExtents;
+
+            IS2Mod.Diagnostics.UIProfiler.End("text   extents (Cairo)", scope);
+
+            _extentsText = Text;
+            _extentsFontName = FontName;
+            _extentsFontSize = ScaledFontSize;
+            _extentsWeight = FontWeight;
+            _extentsSlant = FontSlant;
+            _hasExtents = true;
+        }
+        #endregion
 
         /// <summary>
         /// Cap heights already measured, by font. One entry per font, size, weight and slant in
@@ -429,7 +494,7 @@ namespace IS2Mod.ControlTypes
             // The baseline that puts a capital letter in the middle of the box.
             double middleBaseline = Position.Y + (Size.Y / 2) + (capHeight / 2);
 
-            switch (Orientation)
+            switch (TextAlign)
             {
                 case TextOrientation.Left:
                 case TextOrientation.TopLeft:
@@ -535,7 +600,7 @@ namespace IS2Mod.ControlTypes
             TextExtents te = ctx.TextExtents(line);
 
             // For wrapped text, only support horizontal alignment
-            return Orientation switch
+            return TextAlign switch
             {
                 TextOrientation.Center or
                 TextOrientation.TopCenter or

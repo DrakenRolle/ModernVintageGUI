@@ -89,6 +89,9 @@ namespace LayoutHarness
 
             CheckContextMenuAnchorIsFree(failures);
             CheckFocusOrder(failures);
+            CheckCrossAxisAlignment(failures);
+            CheckEnabledAndVisible(failures);
+            CheckLayoutDoesNotInvalidateItself(failures);
             CheckRuntimeEditRedraws(failures);
             CheckClipping(failures);
             CheckScrolling(failures);
@@ -505,11 +508,16 @@ namespace LayoutHarness
 
         private static void Check(List<string> failures, bool condition, string what)
         {
+            Check(failures, "pixel canvas", condition, what);
+        }
+
+        private static void Check(List<string> failures, string area, bool condition, string what)
+        {
             Console.WriteLine((condition ? "  ok   " : "  FAIL ") + what);
 
             if (!condition)
             {
-                failures.Add("[pixel canvas] " + what);
+                failures.Add("[" + area + "] " + what);
             }
         }
 
@@ -541,6 +549,383 @@ namespace LayoutHarness
                 (int)(box.Y + (y + 0.5) * pixel),
                 button,
                 0);
+        }
+
+        /// <summary>
+        /// A control's own Orientation is where it sits across its parent's stacking direction.
+        ///
+        /// The three things worth nailing down are that Fill is still what it always was, that
+        /// End lines a control's trailing edge up with where a Fill control's would have been -
+        /// which is what makes a right aligned button under a stretched row look right rather
+        /// than nearly right - and that a value naming the stacking axis is read as Fill instead
+        /// of doing something arbitrary.
+        /// </summary>
+        private static void CheckCrossAxisAlignment(List<string> failures)
+        {
+            const string Area = "cross axis";
+
+            Console.WriteLine();
+            Console.WriteLine("### cross axis alignment");
+            Console.WriteLine("Orientation places a control across the direction its parent stacks in.");
+            Console.WriteLine();
+
+            const double ColumnWidth = 300;
+            const double ColumnPadding = 10;
+
+            // A column, so the cross axis is horizontal.
+            var column = new RectangleControl(_Name: "column");
+            column.InsideOrientation = Orientation.Top;
+            column.Padding = ColumnPadding;
+            column.Size = new PointD(ColumnWidth, 300);
+            column.IsAutoSize = false;
+
+            var filled = new ButtonControl(_Name: "filled") { Text = "Fill" };
+            var left = new ButtonControl(_Name: "left") { Text = "Left", Orientation = Orientation.Left };
+            var centred = new ButtonControl(_Name: "centred") { Text = "Center", Orientation = Orientation.Center };
+            var right = new ButtonControl(_Name: "right") { Text = "Right", Orientation = Orientation.Right };
+
+            // Names the stacking axis, so it says nothing and has to come out as Fill.
+            var onAxis = new ButtonControl(_Name: "onAxis") { Text = "Top", Orientation = Orientation.Top };
+
+            foreach (ButtonControl child in new[] { filled, left, centred, right, onAxis })
+            {
+                column.Children.Add(child);
+            }
+
+            column.PerformLayout();
+
+            double available = ColumnWidth - ColumnPadding * 2;
+            double contentLeft = column.Position.X + ColumnPadding;
+
+            Console.WriteLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "  column {0:0.##} wide, {1:0.##} of it content", ColumnWidth, available));
+
+            foreach (ButtonControl child in new[] { filled, left, centred, right, onAxis })
+            {
+                Console.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "  {0,-8} x {1,6:0.##} .. {2,6:0.##}  width {3,6:0.##}",
+                    child.Name, child.Position.X, child.Position.X + child.Size.X, child.Size.X));
+            }
+
+            // Everything here is "content area minus the control's own margins", because a
+            // stretched control fills the space between its margins rather than the space.
+            Check(failures, Area, Math.Abs(filled.Size.X - (available - filled.Margin * 2)) < 1.0,
+                "Fill is stretched to the whole content width");
+
+            Check(failures, Area, left.Size.X < available - 1.0,
+                "Left keeps its natural width instead");
+
+            Check(failures, Area, Math.Abs(left.Position.X - (contentLeft + left.Margin)) < 0.001,
+                "and sits at the left edge");
+
+            // The point of End: its trailing edge is where the stretched control's is.
+            Check(failures, Area,
+                Math.Abs((right.Position.X + right.Size.X) - (filled.Position.X + filled.Size.X)) < 0.001,
+                "Right ends exactly where the stretched control ends");
+
+            double leadingGap = centred.Position.X - contentLeft;
+            double trailingGap = (contentLeft + available) - (centred.Position.X + centred.Size.X);
+
+            Check(failures, Area, Math.Abs(leadingGap - trailingGap) < 1.0,
+                string.Format(CultureInfo.InvariantCulture,
+                    "Center leaves the same gap on both sides ({0:0.##} and {1:0.##})",
+                    leadingGap, trailingGap));
+
+            Check(failures, Area,
+                Math.Abs(onAxis.Size.X - filled.Size.X) < 0.001 &&
+                Math.Abs(onAxis.Position.X - filled.Position.X) < 0.001,
+                "Top in a column names the stacking axis, so it comes out as Fill");
+
+            // --- a row, which is the same statement turned ninety degrees ---------------
+            const double RowHeight = 200;
+
+            var row = new RectangleControl(_Name: "row");
+            row.InsideOrientation = Orientation.Left;
+            row.Padding = ColumnPadding;
+            row.Size = new PointD(400, RowHeight);
+            row.IsAutoSize = false;
+
+            var rowFill = new ButtonControl(_Name: "rowFill") { Text = "Fill" };
+            var top = new ButtonControl(_Name: "top") { Text = "Top", Orientation = Orientation.Top };
+            var bottom = new ButtonControl(_Name: "bottom") { Text = "Bottom", Orientation = Orientation.Bottom };
+
+            foreach (ButtonControl child in new[] { rowFill, top, bottom })
+            {
+                row.Children.Add(child);
+            }
+
+            row.PerformLayout();
+
+            double rowAvailable = RowHeight - ColumnPadding * 2;
+
+            Check(failures, Area, Math.Abs(rowFill.Size.Y - (rowAvailable - rowFill.Margin * 2)) < 1.0,
+                "in a row, Fill is stretched to the whole content height");
+
+            Check(failures, Area,
+                top.Size.Y < rowAvailable - 1.0 &&
+                Math.Abs(top.Position.Y - (row.Position.Y + ColumnPadding + top.Margin)) < 0.001,
+                "Top keeps its natural height and sits at the top");
+
+            Check(failures, Area,
+                Math.Abs((bottom.Position.Y + bottom.Size.Y) - (rowFill.Position.Y + rowFill.Size.Y)) < 0.001,
+                "Bottom ends where the stretched control ends");
+
+            // --- and it has to scale ----------------------------------------------------
+            column.LayoutScale = 2.0;
+            column.PerformLayout();
+
+            Check(failures, Area,
+                Math.Abs((right.Position.X + right.Size.X) - (filled.Position.X + filled.Size.X)) < 0.001,
+                "the alignment still holds at GUI scale 2");
+        }
+
+        /// <summary>
+        /// Hiding collapses, disabling does not, and neither of them can be reached by Tab or
+        /// by the mouse.
+        ///
+        /// The two are deliberately different and that difference is the whole point of having
+        /// both, so it is checked as one: the same row, once with the middle control hidden and
+        /// once with it disabled, has to come out two different shapes.
+        /// </summary>
+        private static void CheckEnabledAndVisible(List<string> failures)
+        {
+            const string Area = "enabled/visible";
+
+            Console.WriteLine("### enabled and visible");
+            Console.WriteLine("Hiding closes the gap, disabling keeps it, and neither takes input.");
+            Console.WriteLine();
+
+            static (RectangleControl row, ButtonControl a, ButtonControl b, ButtonControl c) BuildRow()
+            {
+                var row = new RectangleControl(_Name: "row");
+                row.InsideOrientation = Orientation.Left;
+                row.Padding = 5;
+
+                var a = new ButtonControl(_Name: "a") { Text = "One" };
+                var b = new ButtonControl(_Name: "b") { Text = "Two" };
+                var c = new ButtonControl(_Name: "c") { Text = "Three" };
+
+                row.Children.Add(a);
+                row.Children.Add(b);
+                row.Children.Add(c);
+
+                row.PerformLayout();
+
+                return (row, a, b, c);
+            }
+
+            // --- hiding collapses -------------------------------------------------------
+            (RectangleControl row, ButtonControl a, ButtonControl b, ButtonControl c) = BuildRow();
+
+            double fullWidth = row.Size.X;
+            double middleWidth = b.Size.X + b.Margin * 2;
+            double thirdBefore = c.Position.X;
+
+            b.IsVisible = false;
+            row.PerformLayout();
+
+            double hiddenWidth = row.Size.X;
+            double shrunkBy = fullWidth - hiddenWidth;
+
+            Console.WriteLine(string.Format(
+                CultureInfo.InvariantCulture,
+                "  row is {0:0.##} wide, {1:0.##} with the middle button hidden (it was {2:0.##} wide)",
+                fullWidth, hiddenWidth, middleWidth));
+
+            Check(failures, Area, Math.Abs(shrunkBy - middleWidth) < 1.0,
+                "hiding the middle button shrinks the row by exactly its width");
+
+            Check(failures, Area, Math.Abs(c.Position.X - b.Position.X) < 1.0,
+                "the third button moved up into the gap");
+
+            Check(failures, Area, c.Position.X < thirdBefore - 1.0,
+                "and is left of where it was");
+
+            // Showing it again has to give back the layout it started with, or hide/show would
+            // slowly drift a dialog out of shape over a session.
+            b.IsVisible = true;
+            row.PerformLayout();
+
+            Check(failures, Area, Math.Abs(row.Size.X - fullWidth) < 0.001,
+                "showing it again restores the original width exactly");
+
+            Check(failures, Area, Math.Abs(c.Position.X - thirdBefore) < 0.001,
+                "and the third button goes back where it was");
+
+            // --- disabling does not -----------------------------------------------------
+            b.IsEnabled = false;
+            row.PerformLayout();
+
+            Check(failures, Area, Math.Abs(row.Size.X - fullWidth) < 0.001,
+                "disabling the middle button leaves the row the same width");
+
+            Check(failures, Area, Math.Abs(c.Position.X - thirdBefore) < 0.001,
+                "and leaves the third button where it was");
+
+            // --- neither is reachable ---------------------------------------------------
+            b.IsEnabled = true;
+            b.IsVisible = false;
+            row.PerformLayout();
+
+            string[] hiddenOrder = UIControl.FocusableControls(row).Select(x => x.Name).ToArray();
+            Check(failures, Area, !hiddenOrder.Contains("b"),
+                "a hidden control is out of the tab order, got " + string.Join(", ", hiddenOrder));
+
+            b.IsVisible = true;
+            b.IsEnabled = false;
+            row.PerformLayout();
+
+            string[] disabledOrder = UIControl.FocusableControls(row).Select(x => x.Name).ToArray();
+            Check(failures, Area, !disabledOrder.Contains("b"),
+                "a disabled control is out of the tab order, got " + string.Join(", ", disabledOrder));
+
+            // The mouse. A point in the middle of the button that is now disabled has to find
+            // the button - it covers what is behind it - while the same point on a hidden one
+            // has to fall through to the row.
+            double midX = b.Position.X + b.Size.X / 2;
+            double midY = b.Position.Y + b.Size.Y / 2;
+
+            UIControl? onDisabled = UIControl.ControlAt(row, midX, midY);
+            Check(failures, Area, ReferenceEquals(onDisabled, b),
+                "a click on a disabled control still lands on it rather than falling through");
+
+            // For the hidden case the row is the wrong shape of test: hiding a control in a
+            // stack closes the gap, so the click lands on whatever moved into it, which proves
+            // the collapse rather than the hit test. An overlay container states it cleanly -
+            // two controls on the same spot, and hiding the front one has to reveal the back
+            // one to the mouse.
+            var stack = new RectangleControl(_Name: "stack");
+            stack.InsideOrientation = Orientation.None;
+            stack.Padding = 0;
+            stack.Size = new PointD(120, 40);
+            stack.IsAutoSize = false;
+
+            // Same explicit size for both, so "the same point" is unambiguously inside each of
+            // them and the check cannot pass or fail on how wide their captions happen to be.
+            var back = new ButtonControl(_Name: "back") { Text = "Back" };
+            var front = new ButtonControl(_Name: "front") { Text = "Front" };
+
+            foreach (ButtonControl layer in new[] { back, front })
+            {
+                layer.Size = new PointD(100, 30);
+                layer.IsAutoSize = false;
+                stack.Children.Add(layer);
+            }
+
+            stack.PerformLayout();
+
+            double stackX = front.Position.X + front.Size.X / 2;
+            double stackY = front.Position.Y + front.Size.Y / 2;
+
+            Check(failures, Area, ReferenceEquals(UIControl.ControlAt(stack, stackX, stackY), front),
+                "with both showing, the front control takes the click");
+
+            front.IsVisible = false;
+            stack.PerformLayout();
+
+            Check(failures, Area, ReferenceEquals(UIControl.ControlAt(stack, stackX, stackY), back),
+                "hiding it hands the same click to the one behind it");
+
+            // --- the inheritance --------------------------------------------------------
+            (RectangleControl panel, ButtonControl inner, _, _) = BuildRow();
+            panel.IsEnabled = false;
+            panel.PerformLayout();
+
+            Check(failures, Area, inner.IsEnabled && !inner.IsEffectivelyEnabled,
+                "a child of a disabled panel keeps its own IsEnabled but is not effectively enabled");
+
+            Check(failures, Area, UIControl.FocusableControls(panel).ToArray().Length == 0,
+                "and nothing inside a disabled panel is in the tab order");
+
+            UIControl? insidePanel = UIControl.ControlAt(
+                panel,
+                inner.Position.X + inner.Size.X / 2,
+                inner.Position.Y + inner.Size.Y / 2);
+
+            Check(failures, Area, ReferenceEquals(insidePanel, panel),
+                "the hit test stops at the disabled panel instead of finding the button in it");
+        }
+
+        /// <summary>
+        /// The layout pass must not write any property that invalidates the layout.
+        ///
+        /// This is the trap the automatic invalidation sits next to: the arrange pass assigns
+        /// Position, and Position notifies. If a property the layout writes ever ends up in
+        /// UIControl's layout-invalidating set, a single change would start a pass that starts
+        /// a pass, forever - in the game, not here, because nothing invalidates without an open
+        /// dialog. So the invariant is checked here, where a regression is a failing build
+        /// rather than a frozen client.
+        /// </summary>
+        private static void CheckLayoutDoesNotInvalidateItself(List<string> failures)
+        {
+            const string Area = "invalidation";
+
+            Console.WriteLine();
+            Console.WriteLine("### invalidation");
+            Console.WriteLine("A layout pass must not write a property that asks for a layout pass.");
+            Console.WriteLine();
+
+            // The names UIControl.LayoutInvalidatingProperties holds. Written out rather than
+            // read by reflection on purpose: this is the contract, and a check that read the
+            // implementation would agree with it however wrong it got.
+            var invalidating = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Size", "IsAutoSize", "Margin", "Padding", "MaxSize",
+                "InsideOrientation", "Orientation", "ClipsChildren", "IsVisible",
+            };
+
+            RectangleControl root = Scenarios.All()
+                .First(s => s.Name == "test-dialog")
+                .Build();
+
+            // Lay out once first: this is about the steady state, and the very first pass of a
+            // freshly built tree legitimately assigns sizes that were never set.
+            root.PerformLayout();
+
+            var written = new List<string>();
+
+            void Watch(UIControl control)
+            {
+                control.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName != null && invalidating.Contains(e.PropertyName))
+                    {
+                        written.Add(control.GetType().Name + "." + e.PropertyName);
+                    }
+                };
+
+                foreach (UIControl child in control.Children)
+                {
+                    Watch(child);
+                }
+            }
+
+            Watch(root);
+
+            root.PerformLayout();
+            root.PerformLayout();
+
+            Check(failures, Area, written.Count == 0,
+                written.Count == 0
+                    ? "two further layout passes wrote no layout-invalidating property"
+                    : "a layout pass wrote: " + string.Join(", ", written.Distinct()));
+
+            // And the notification itself has to work, or the invalidation never runs at all.
+            var probe = new ButtonControl(_Name: "probe") { Text = "Probe" };
+            var seen = new List<string>();
+            probe.PropertyChanged += (_, e) => seen.Add(e.PropertyName ?? "");
+
+            probe.Margin = 7;
+            probe.IsVisible = false;
+            probe.IsEnabled = false;
+            probe.Size = new PointD(120, 30);
+
+            foreach (string name in new[] { "Margin", "IsVisible", "IsEnabled", "Size" })
+            {
+                Check(failures, Area, seen.Contains(name), "assigning " + name + " notifies");
+            }
         }
 
         private static void CheckFocusOrder(List<string> failures)
@@ -1243,6 +1628,13 @@ namespace LayoutHarness
                 // only to be given a position, and its menu lives in a popup of its own. That it
                 // costs no space is checked properly by CheckContextMenuAnchorIsFree.
                 if (control is ContextMenuControl)
+                    continue;
+
+                // A hidden control is never measured - that is what hiding means here - so it
+                // and everything under it keeps whatever size it last had, which for a control
+                // that was hidden before it was ever laid out is nothing. Its own collapse is
+                // the intended state and its descendants' collapse follows from it.
+                if (!control.IsEffectivelyVisible)
                     continue;
 
                 failures.Add(

@@ -145,6 +145,87 @@ namespace LayoutHarness
             yield return ("readme-keyboard-focus", BuildKeyboardFocus());
             yield return ("readme-runtime-before", BuildRuntimeEdit(added: false));
             yield return ("readme-runtime-after", BuildRuntimeEdit(added: true));
+            yield return ("readme-enabled-hidden", BuildEnabledAndHidden());
+            yield return ("readme-cross-axis", BuildCrossAxis());
+        }
+
+        /// <summary>
+        /// The four alignments in a column. A picture is the only honest way to explain this
+        /// one: "Right lines up with where Fill ends" is a sentence, and the alternative to it
+        /// is a screenshot of four buttons that obviously do.
+        /// </summary>
+        private static UIControl BuildCrossAxis()
+        {
+            RectangleControl root = CreateDialogRoot();
+
+            var column = new RectangleControl(_Name: "column");
+            column.InsideOrientation = Orientation.Top;
+            column.Size = new PointD(240, 190);
+            column.IsAutoSize = false;
+
+            foreach ((string caption, Orientation align) in new[]
+            {
+                ("Fill - the default", Orientation.Fill),
+                ("Left", Orientation.Left),
+                ("Center", Orientation.Center),
+                ("Right", Orientation.Right),
+            })
+            {
+                column.Children.Add(new ButtonControl(_Name: "col-" + caption)
+                {
+                    Text = caption,
+                    Orientation = align
+                });
+            }
+
+            root.Children.Add(column);
+            return root;
+        }
+
+        /// <summary>
+        /// Disabled next to hidden, because the difference between them is the whole reason
+        /// there are two, and a sentence describing it is less convincing than the two rows
+        /// coming out different widths.
+        /// </summary>
+        private static UIControl BuildEnabledAndHidden()
+        {
+            RectangleControl root = CreateDialogRoot();
+
+            static RectangleControl Row(string name, Action<ButtonControl, CheckboxControl> arrange)
+            {
+                var row = new RectangleControl(_Name: name);
+                row.InsideOrientation = Orientation.Left;
+
+                var first = new ButtonControl(_Name: name + "-first") { Text = "Enabled" };
+                var middle = new ButtonControl(_Name: name + "-middle") { Text = "Middle" };
+                var box = new CheckboxControl(_Name: name + "-box") { Text = "A checkbox" };
+
+                row.Children.Add(first);
+                row.Children.Add(middle);
+                row.Children.Add(box);
+
+                arrange(middle, box);
+
+                return row;
+            }
+
+            root.Children.Add(new TextLabelControl("disabled - keeps its place", _Name: "capDisabled"));
+            root.Children.Add(Row("disabledRow", (middle, box) =>
+            {
+                middle.IsEnabled = false;
+                box.IsEnabled = false;
+            }));
+
+            root.Children.Add(new TextLabelControl("hidden - the row closes up", _Name: "capHidden"));
+            root.Children.Add(Row("hiddenRow", (middle, _) => middle.IsVisible = false));
+
+            root.Children.Add(new TextLabelControl("a whole disabled container", _Name: "capPanel"));
+
+            RectangleControl panel = Row("panelRow", (_, _) => { });
+            panel.IsEnabled = false;
+            root.Children.Add(panel);
+
+            return root;
         }
 
         /// <summary>
@@ -271,7 +352,7 @@ namespace LayoutHarness
             row.Children.Add(left);
 
             var label = new TextLabelControl("in between", _Name: "label");
-            label.Orientation = TextOrientation.Center;
+            label.TextAlign = TextOrientation.Center;
             row.Children.Add(label);
 
             var right = new ButtonControl();

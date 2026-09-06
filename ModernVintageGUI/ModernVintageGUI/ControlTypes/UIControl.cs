@@ -208,8 +208,16 @@ namespace IS2Mod.ControlTypes
             get => _size;
             set
             {
+                if (_explicitSize.X == value.X && _explicitSize.Y == value.Y && _size.X == value.X && _size.Y == value.Y)
+                    return;
+
                 _explicitSize = value;
                 _size = value;
+
+                // Deliberately not SetProperty: this writes two fields, and the layout pass
+                // writes _size through SetLayoutSize without ever coming through here. Only the
+                // assignment from outside - "make this list 200x150" - invalidates.
+                OnPropertyChanged();
             }
         }
 
@@ -297,10 +305,89 @@ namespace IS2Mod.ControlTypes
         }
 
         private Orientation _orientation;
+        /// <summary>
+        /// Where this control sits *across* its parent's stacking direction. In a column that is
+        /// horizontal - Left, Right, Center or Fill - and in a row it is vertical - Top, Bottom,
+        /// Center or Fill.
+        ///
+        /// <see cref="Enums.Orientation.Fill"/> is the default and stretches the control to the
+        /// full width of the column, or the full height of the row. The other three leave it at
+        /// its natural size and decide which end of the free space it takes.
+        ///
+        /// Along the stacking direction this says nothing: where a control lands there is
+        /// decided by the order of the children, so a value naming that axis - Top in a column,
+        /// Left in a row - is read as Fill rather than as a contradiction. Same for
+        /// <see cref="Enums.Orientation.None"/>, and for every child of an overlay container
+        /// (<c>InsideOrientation = None</c>), which has no cross axis to align across.
+        /// </summary>
         public Orientation Orientation
         {
             get => _orientation;
             set => SetProperty(ref _orientation, value);
+        }
+
+        /// <summary>
+        /// What <see cref="Orientation"/> comes out as once the parent's stacking direction is
+        /// known. Four cases rather than seven, because most of the enum is two names for the
+        /// same two ends of an axis.
+        /// </summary>
+        protected internal enum CrossAlignment
+        {
+            /// <summary>Stretched to the full extent of the parent across the stacking axis.</summary>
+            Fill,
+
+            /// <summary>Natural size, at the left of a column or the top of a row.</summary>
+            Start,
+
+            /// <summary>Natural size, centred.</summary>
+            Center,
+
+            /// <summary>Natural size, at the right of a column or the bottom of a row.</summary>
+            End
+        }
+
+        /// <summary>
+        /// <see cref="Orientation"/> resolved against the axis it is actually read on. This is
+        /// the single place the mapping lives, so the stretching in the arrange pass and the
+        /// positioning cannot disagree about what a value meant.
+        /// </summary>
+        protected internal CrossAlignment CrossAlign
+        {
+            get
+            {
+                Orientation stacking = Parent?.InsideOrientation ?? Orientation.Top;
+
+                switch (stacking)
+                {
+                    // A column. The cross axis is horizontal, so only the horizontal names say
+                    // anything; Top and Bottom name the stacking axis and are read as Fill.
+                    case Orientation.Top:
+                    case Orientation.Bottom:
+                        return _orientation switch
+                        {
+                            Orientation.Left => CrossAlignment.Start,
+                            Orientation.Right => CrossAlignment.End,
+                            Orientation.Center => CrossAlignment.Center,
+                            _ => CrossAlignment.Fill
+                        };
+
+                    // A row, and the mirror image of the above.
+                    case Orientation.Left:
+                    case Orientation.Right:
+                        return _orientation switch
+                        {
+                            Orientation.Top => CrossAlignment.Start,
+                            Orientation.Bottom => CrossAlignment.End,
+                            Orientation.Center => CrossAlignment.Center,
+                            _ => CrossAlignment.Fill
+                        };
+
+                    // An overlay stacks in no direction at all, so there is no cross axis to be
+                    // aligned across. Everything sits at the origin at its natural size.
+                    default:
+                        return CrossAlignment.Start;
+                }
+            }
         }
 
         private string _name;
@@ -316,6 +403,110 @@ namespace IS2Mod.ControlTypes
             get => _isStaticElement;
             set => SetProperty(ref _isStaticElement, value);
         }
+
+        private bool _isVisible = true;
+        /// <summary>
+        /// Whether this control takes part in the dialog at all.
+        ///
+        /// Hiding *collapses*: an invisible control is not measured, takes no space in its
+        /// parent's stack, is not drawn, cannot be hit by the mouse and is not in the tab order.
+        /// That is the WinForms rule rather than the WPF one, and it is the one a stacking
+        /// layout wants - a row that hides its third button should close up, not leave a hole.
+        /// Reserving the space is what an empty <see cref="RectangleControl"/> of a fixed size
+        /// is for.
+        ///
+        /// The subtree goes with it: hiding a container hides everything in it, and the
+        /// children keep their own IsVisible so that showing the container again restores
+        /// exactly what was showing before.
+        ///
+        /// <see cref="Custom.CustomDialogElement"/> reuses this as "is the dialog on screen",
+        /// which is the same statement one level up - assigning it there is Show() and Hide().
+        /// </summary>
+        public bool IsVisible
+        {
+            get => _isVisible;
+            set => SetVisibleCore(value);
+        }
+
+        /// <summary>
+        /// The one place <see cref="IsVisible"/> is written, so that a subclass can route the
+        /// assignment somewhere else without the property and the state drifting apart.
+        /// <see cref="Custom.CustomDialogElement"/> overrides it to run its Show/Hide bookkeeping.
+        /// </summary>
+        protected virtual void SetVisibleCore(bool value)
+        {
+            SetProperty(ref _isVisible, value, nameof(IsVisible));
+        }
+
+        /// <summary>Writes the field without going through an override. For subclass use.</summary>
+        protected void SetVisibleField(bool value)
+        {
+            SetProperty(ref _isVisible, value, nameof(IsVisible));
+        }
+
+        /// <summary>
+        /// True when this control and every one of its ancestors is visible. What decides
+        /// whether the player can actually see it - a visible control inside a hidden panel is
+        /// not on screen.
+        /// </summary>
+        public bool IsEffectivelyVisible
+        {
+            get
+            {
+                for (UIControl? control = this; control != null; control = control.Parent)
+                {
+                    if (!control._isVisible)
+                        return false;
+                }
+
+                return true;
+            }
+        }
+
+        private bool _isEnabled = true;
+        /// <summary>
+        /// Whether this control reacts to the player. On by default.
+        ///
+        /// A disabled control still takes its space and is still drawn - dimmed, so that the
+        /// dialog does not silently change shape - but it receives no mouse events, never
+        /// hovers, and is out of the tab order. It also swallows clicks that land on it rather
+        /// than letting them through to whatever is behind, which is what keeps a disabled
+        /// button from being a hole in the dialog.
+        ///
+        /// It is inherited downwards: disabling a container disables everything in it, without
+        /// touching the children's own IsEnabled, so enabling the container again brings back
+        /// exactly the state it had. Read <see cref="IsEffectivelyEnabled"/> when you need the
+        /// answer that accounts for the ancestors.
+        /// </summary>
+        public bool IsEnabled
+        {
+            get => _isEnabled;
+            set => SetProperty(ref _isEnabled, value);
+        }
+
+        /// <summary>
+        /// True when this control and every one of its ancestors is enabled. This, not
+        /// <see cref="IsEnabled"/>, is what input and focus ask.
+        /// </summary>
+        public bool IsEffectivelyEnabled
+        {
+            get
+            {
+                for (UIControl? control = this; control != null; control = control.Parent)
+                {
+                    if (!control._isEnabled)
+                        return false;
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Whether this control can be focused right now: it wants focus, and it is neither
+        /// hidden nor disabled. <see cref="IsFocusable"/> on its own is only the wish.
+        /// </summary>
+        public bool CanTakeFocus => IsFocusable && _isEnabled && _isVisible;
 
         private bool _isFocusable;
         /// <summary>
@@ -467,7 +658,11 @@ namespace IS2Mod.ControlTypes
             _padding = _Padding;
             _index = _Index;
             _insideOrientation = _Orientation;
-            _orientation = Orientation.Top; // Default child orientation
+
+            // Fill is the default because it is what every control did before this property
+            // meant anything: stretched across its parent. Anything else here would silently
+            // reshape every dialog that was written before the choice existed.
+            _orientation = Orientation.Fill;
 
             if (_Size.HasValue)
             {
@@ -537,16 +732,64 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         private void DrawProfiled(ImageSurface surface, Context context)
         {
+            // A hidden control draws nothing, and neither does anything below it. This is the
+            // single gate for the whole subtree, which is why it sits in the child loop rather
+            // than in every control's own GenerateRenderData.
+            if (!IsVisible)
+                return;
+
+            // Whether *this* control is the one that turned the subtree off. Only the topmost
+            // disabled control dims, otherwise nesting would stack the scrims and a disabled
+            // panel would be darker where its disabled children are.
+            bool dimsSubtree = !IsEnabled && (Parent == null || Parent.IsEffectivelyEnabled);
+
             if (!Diagnostics.UIProfiler.Enabled)
             {
                 GenerateRenderData(surface, context);
+
+                if (dimsSubtree)
+                    DrawDisabledOverlay(context);
+
                 return;
             }
 
             Diagnostics.UIProfiler.Scope scope = Diagnostics.UIProfiler.Begin();
             GenerateRenderData(surface, context);
+
+            if (dimsSubtree)
+                DrawDisabledOverlay(context);
+
             Diagnostics.UIProfiler.End("draw   " + GetType().Name, scope);
         }
+
+        /// <summary>
+        /// What a disabled control looks like. The default lays a wash of the dialog background
+        /// colour over the control's box, which reads as "greyed out" over every control at
+        /// once and, unlike redrawing each control in a second palette, cannot go out of step
+        /// with what that control normally draws.
+        ///
+        /// Override it where a control can do better - a button that draws its own flat, unlit
+        /// face, say. Drawing nothing is a valid override for a control that is disabled so
+        /// often that dimming would be noise.
+        /// </summary>
+        protected virtual void DrawDisabledOverlay(Context ctx)
+        {
+            if (Size.X <= 0 || Size.Y <= 0)
+                return;
+
+            ctx.Save();
+            ctx.Rectangle(Position.X, Position.Y, Size.X, Size.Y);
+            ctx.SetSourceRGBA(
+                GuiStyle.DialogDefaultBgColor[0],
+                GuiStyle.DialogDefaultBgColor[1],
+                GuiStyle.DialogDefaultBgColor[2],
+                DisabledOverlayOpacity);
+            ctx.Fill();
+            ctx.Restore();
+        }
+
+        /// <summary>How much of the control the disabled wash covers.</summary>
+        protected const double DisabledOverlayOpacity = 0.55;
 
         /// <summary>
         /// The area this control's children were laid out into: its own box inset by its padding.
@@ -604,6 +847,12 @@ namespace IS2Mod.ControlTypes
         /// </summary>
         public virtual void GenerateInteractiveRenderData(ICoreClientAPI api, float deltaTime)
         {
+            // Same gate as the Cairo pass: a hidden subtree draws in neither of them. Without
+            // this the item stacks of a hidden inventory grid would keep being drawn, because
+            // they never go through the surface that the first pass skipped.
+            if (!IsVisible)
+                return;
+
             if (Children.Count == 0)
                 return;
 
@@ -624,6 +873,12 @@ namespace IS2Mod.ControlTypes
 
             foreach (UIControl child in Children)
             {
+                // Checked here as well as at the top of the method: a control that overrides
+                // this pass and does not call the base - ItemSlotControl does exactly that -
+                // would otherwise miss the gate entirely.
+                if (!child.IsVisible)
+                    continue;
+
                 child.GenerateInteractiveRenderData(api, deltaTime);
             }
 
@@ -836,6 +1091,14 @@ namespace IS2Mod.ControlTypes
             if (dialog == null || !dialog.IsVisible)
                 return;
 
+            // A control that changes a layout property from inside its own measure or arrange -
+            // a list deciding it needs a scrollbar, say - would otherwise start a second pass
+            // from within the first and never come back. The pass that is already running will
+            // see the new value anyway if it has not measured that control yet, and if it has,
+            // the change lands on the next one.
+            if (dialog.IsLayingOut)
+                return;
+
             Diagnostics.UIProfiler.Scope scope = Diagnostics.UIProfiler.Begin();
 
             dialog.PerformLayout();
@@ -859,6 +1122,12 @@ namespace IS2Mod.ControlTypes
 
             foreach (UIControl child in Children)
             {
+                // A hidden child collapses: it is not measured at all, so it costs nothing and
+                // contributes nothing. Its own Size keeps whatever it had, which is what lets
+                // it come back unchanged when it is shown again.
+                if (!child.IsVisible)
+                    continue;
+
                 PointD childSize = child.MeasureProfiled();
                 PointD childSizeWithSpacing = GetChildSizeWithSpacing(child, childSize);
                 content = MergeSizeByOrientation(childSizeWithSpacing, content);
@@ -951,6 +1220,9 @@ namespace IS2Mod.ControlTypes
             // every one of them re-measured the text of every button it passed.
             foreach (UIControl child in Children)
             {
+                if (!child.IsVisible)
+                    continue;
+
                 child.NormalizeChildrenByDelta();
             }
         }
@@ -963,6 +1235,16 @@ namespace IS2Mod.ControlTypes
         {
             foreach (UIControl child in Children)
             {
+                if (!child.IsVisible)
+                    continue;
+
+                // Only a child that asked to fill gets stretched. The other three alignments
+                // are the whole reason for asking: they mean "leave me at the size I measured
+                // to and put me at that end of the row", and stretching would make all four
+                // look the same.
+                if (child.CrossAlign != CrossAlignment.Fill)
+                    continue;
+
                 // Calculate width available for this child (subtract child's margins)
                 double childAvailableWidth = availableWidth - (child.ScaledMargin * 2);
 
@@ -991,6 +1273,13 @@ namespace IS2Mod.ControlTypes
         {
             foreach (UIControl child in Children)
             {
+                if (!child.IsVisible)
+                    continue;
+
+                // Same as above, on the other axis.
+                if (child.CrossAlign != CrossAlignment.Fill)
+                    continue;
+
                 // Calculate height available for this child (subtract child's margins)
                 double childAvailableHeight = availableHeight - (child.ScaledMargin * 2);
 
@@ -1068,12 +1357,25 @@ namespace IS2Mod.ControlTypes
                 Position = new PointD(0, 0);
             }
 
-            // Calculate positions for all children
+            // Calculate positions for all children.
+            //
+            // The "previous sibling" a child stacks after is the previous *visible* one, not
+            // simply the one before it in the list. Hiding a control has to close the gap it
+            // left, and stacking after a collapsed control would leave its two margins behind
+            // as a stripe of nothing.
+            UIControl? previousSibling = null;
+
             for (int i = 0; i < Children.Count; i++)
             {
-                UIControl? previousSibling = i > 0 ? Children[i - 1] : null;
-                Children[i].CalculatePosition(previousSibling);
-                Children[i].CalculateAllPositions();
+                UIControl child = Children[i];
+
+                if (!child.IsVisible)
+                    continue;
+
+                child.CalculatePosition(previousSibling);
+                child.CalculateAllPositions();
+
+                previousSibling = child;
             }
 
             // Normalize children after positions are calculated
@@ -1081,8 +1383,12 @@ namespace IS2Mod.ControlTypes
         }
 
         /// <summary>
-        /// FIXED: Calculates the position of this control relative to its parent and siblings.
-        /// Now correctly handles Orientation.Right to position on the right side.
+        /// Where this control goes: along the stacking axis after its previous visible sibling,
+        /// and across that axis wherever its <see cref="Orientation"/> asked for.
+        ///
+        /// The two axes are decided separately and in that order, because they answer different
+        /// questions. The stacking axis is not negotiable - it is the order of the children -
+        /// while the cross axis is the only one a control gets a say over.
         /// </summary>
         public void CalculatePosition(UIControl? previousSibling)
         {
@@ -1094,23 +1400,13 @@ namespace IS2Mod.ControlTypes
                 return;
             }
 
-            // Calculate base position with parent padding and own margin
+            // The leading corner of the parent's content area, plus this control's own margin.
+            // Both axes start here and only one of them moves.
             double posX = Parent.Position.X + Parent.ScaledPadding + ScaledMargin;
             double posY = Parent.Position.Y + Parent.ScaledPadding + ScaledMargin;
 
-            // FIXED: Handle Orientation.Right - position from the right edge
-            if (Orientation == Orientation.Right)
-            {
-                posX = Parent.Position.X + Parent.Size.X - Size.X - ScaledMargin - Parent.ScaledPadding;
-            }
-
-            // FIXED: Handle Orientation.Bottom - position from the bottom edge
-            if (Orientation == Orientation.Bottom)
-            {
-                posY = Parent.Position.Y + Parent.Size.Y - Size.Y - ScaledMargin - Parent.ScaledPadding;
-            }
-
-            // Adjust position based on previous sibling and parent orientation
+            // Along the stacking axis: after the previous visible sibling. The first child stays
+            // at the leading corner, which is what the lack of a previous sibling means.
             if (previousSibling != null)
             {
                 switch (Parent.InsideOrientation)
@@ -1132,6 +1428,28 @@ namespace IS2Mod.ControlTypes
                 }
             }
 
+            // Across it: whatever Orientation resolved to. A Fill control was already stretched
+            // to the whole width by the arrange pass, so there is no free space left to move it
+            // through and this leaves it exactly where it is.
+            LayoutRect arrange = Parent.ArrangeBox();
+
+            switch (Parent.InsideOrientation)
+            {
+                case Orientation.Top:
+                case Orientation.Bottom:
+                    posX = AlignAcross(posX, arrange.Width, Size.X);
+                    break;
+
+                case Orientation.Left:
+                case Orientation.Right:
+                    posY = AlignAcross(posY, arrange.Height, Size.Y);
+                    break;
+
+                case Orientation.None:
+                    // An overlay stacks in no direction, so it has no cross axis either.
+                    break;
+            }
+
             // Apply clipping if control extends beyond parent bounds
             PointD clippedSize = CalculateClippedSize(posX, posY);
 
@@ -1141,6 +1459,40 @@ namespace IS2Mod.ControlTypes
             // would turn the clipped value into the ExplicitSize that the next measure pass
             // starts from, and the control would shrink a little more on every pass.
             SetLayoutSize(clippedSize);
+        }
+
+        /// <summary>
+        /// Moves a control through the free space across the stacking axis, according to
+        /// <see cref="CrossAlign"/>.
+        /// </summary>
+        /// <param name="start">The leading edge, margin already added.</param>
+        /// <param name="available">
+        /// The parent's extent across that axis - the same number the arrange pass stretches a
+        /// Fill child to, so that End puts a control's trailing edge exactly where a Fill
+        /// control's would have been.
+        /// </param>
+        /// <param name="size">This control's extent across that axis.</param>
+        private double AlignAcross(double start, double available, double size)
+        {
+            double free = available - size - ScaledMargin * 2;
+
+            // Nothing to move through. Also the case for a Fill control, which was stretched to
+            // exactly this much, and for one that overflows its parent - where sliding it
+            // further would only push it out on the other side.
+            if (free <= 0)
+                return start;
+
+            switch (CrossAlign)
+            {
+                case CrossAlignment.End:
+                    return start + free;
+
+                case CrossAlignment.Center:
+                    return start + free / 2;
+
+                default:
+                    return start;
+            }
         }
 
         /// <summary>
@@ -1218,12 +1570,7 @@ namespace IS2Mod.ControlTypes
             double localX = screenX - Position.X;
             double localY = screenY - Position.Y;
 
-            if (!ContainsLocalPoint(localX, localY))
-            {
-                return null;
-            }
-
-            return HitTestRecursive(this, localX, localY);
+            return HitTestGated(localX, localY);
         }
 
         /// <summary>
@@ -1240,6 +1587,23 @@ namespace IS2Mod.ControlTypes
                    localX <= left + Size.X &&
                    localY >= top &&
                    localY <= top + Size.Y;
+        }
+
+        /// <summary>
+        /// The control at a point given in the coordinates <paramref name="root"/> was laid out
+        /// in - the same answer a click would get, without needing a click.
+        ///
+        /// Static, and taking the root as a parameter, for the same reason
+        /// <see cref="FocusableControls"/> is: it lets the layout harness ask what is under a
+        /// point without a dialog and therefore without the game. Mods can use it to find out
+        /// what is under the cursor outside of an event.
+        /// </summary>
+        public static UIControl? ControlAt(UIControl root, double localX, double localY)
+        {
+            if (root == null)
+                return null;
+
+            return root.HitTestGated(localX, localY);
         }
 
         /// <summary>
@@ -1265,7 +1629,7 @@ namespace IS2Mod.ControlTypes
             for (int i = control.Children.Count - 1; i >= 0; i--)
             {
                 UIControl child = control.Children[i];
-                UIControl? hit = child.HitTestRecursive(child, localX, localY);
+                UIControl? hit = child.HitTestGated(localX, localY);
                 if (hit != null)
                 {
                     return hit;
@@ -1273,6 +1637,39 @@ namespace IS2Mod.ControlTypes
             }
 
             return control;
+        }
+
+        /// <summary>
+        /// The gate every hit test goes through before <see cref="HitTestRecursive"/> gets a
+        /// say. Not virtual, and that is the point.
+        ///
+        /// Ten controls override HitTestRecursive to be atomic - a button must be hovered as a
+        /// button, not as the label inside it - and every one of them does so by returning
+        /// itself without consulting anything else. Putting the visible and enabled rules
+        /// inside that method would mean each of those overrides silently opting out of them,
+        /// which is exactly the sort of thing nobody notices until a disabled button turns out
+        /// to still be clickable. So the rules live in front of it, where an override cannot
+        /// reach them, and HitTestRecursive stays what it is: the answer to "which of my parts
+        /// is this", asked only once the control has agreed to be asked at all.
+        /// </summary>
+        protected UIControl? HitTestGated(double localX, double localY)
+        {
+            // Hidden: not there. The click carries on to whatever is behind, exactly as if the
+            // control had been taken out of the tree.
+            if (!IsVisible)
+                return null;
+
+            if (!ContainsLocalPoint(localX, localY))
+                return null;
+
+            // Disabled: there, but inert. It swallows the click rather than letting it through,
+            // and the search stops here so that no enabled child inside a disabled panel can be
+            // found. Refusing to *raise* anything on it is the dialog's job - see
+            // CustomDialogElement.InteractiveTarget.
+            if (!IsEnabled)
+                return this;
+
+            return HitTestRecursive(this, localX, localY);
         }
         #endregion
 
@@ -1291,6 +1688,13 @@ namespace IS2Mod.ControlTypes
         public static IEnumerable<UIControl> FocusableControls(UIControl root)
         {
             if (root == null)
+                yield break;
+
+            // Hidden and disabled subtrees drop out of the tab order whole. Walking into them
+            // and filtering at the leaves would be wrong as well as wasteful: an enabled button
+            // inside a disabled panel must not be reachable by Tab either, and the panel is the
+            // only place that is known.
+            if (!root.IsVisible || !root.IsEnabled)
                 yield break;
 
             if (root.IsFocusable)
@@ -1338,9 +1742,87 @@ namespace IS2Mod.ControlTypes
         #endregion
 
         #region Property Change Notification
+        /// <summary>
+        /// The properties of this class whose change makes the laid out tree wrong, so that
+        /// assigning one has to re-run measure and arrange before the next redraw.
+        ///
+        /// This is a list rather than "everything that notifies" for one specific reason: the
+        /// arrange pass writes <see cref="Position"/>, and Position notifies. Invalidating on
+        /// every notification would therefore make the layout re-enter itself forever. Anything
+        /// added here must be an *input* of the layout, never a result of it.
+        /// </summary>
+        private static readonly HashSet<string> LayoutInvalidatingProperties =
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(Size),
+                nameof(IsAutoSize),
+                nameof(Margin),
+                nameof(Padding),
+                nameof(MaxSize),
+                nameof(InsideOrientation),
+                nameof(Orientation),
+                nameof(ClipsChildren),
+                nameof(IsVisible),
+            };
+
+        /// <summary>
+        /// Properties that change what the control looks like without moving anything. These
+        /// only need the surface drawn again, which is a good deal cheaper than a layout pass.
+        /// </summary>
+        private static readonly HashSet<string> VisualInvalidatingProperties =
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(IsEnabled),
+                nameof(HasKeyboardFocus),
+            };
+
         protected void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+            if (propertyName == null)
+                return;
+
+            // Handlers run first on purpose: a subscriber that reacts by changing something
+            // else should have done so before we decide what to re-run, so that one gesture
+            // costs one layout pass rather than two.
+            if (LayoutInvalidatingProperties.Contains(propertyName))
+            {
+                InvalidateLayout();
+            }
+            else if (VisualInvalidatingProperties.Contains(propertyName))
+            {
+                InvalidateVisual();
+            }
+        }
+
+        /// <summary>
+        /// Says that this control's box may have changed, so the dialog has to measure and
+        /// arrange again and then redraw. Does nothing while the control is not in an open
+        /// dialog, which is what makes building a tree before showing it free.
+        ///
+        /// Controls call this after changing something of their own that the layout reads -
+        /// a label's text, a list's item count. It is the same work
+        /// <see cref="RecomposeToMain"/> does; the name says why rather than what.
+        /// </summary>
+        protected internal void InvalidateLayout()
+        {
+            RecomposeToMain();
+        }
+
+        /// <summary>
+        /// Says that this control draws differently but occupies the same box - a hover, a
+        /// colour, a checked state. Only the surface is rebuilt, and only once for the frame:
+        /// <see cref="Custom.CustomDialogElement.Refresh"/> coalesces.
+        /// </summary>
+        protected internal void InvalidateVisual()
+        {
+            CustomDialogElement? dialog = Dialog;
+
+            if (dialog == null || !dialog.IsVisible)
+                return;
+
+            dialog.Refresh();
         }
 
         protected bool SetProperty<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)

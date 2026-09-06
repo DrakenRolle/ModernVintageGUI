@@ -17,8 +17,37 @@ namespace IS2Mod.ControlTypes.Custom
         public string DialogName { get; set; }
         public string Title { get; set; }
         public ICoreClientAPI Api { get; private set; }
-        public bool IsVisible { get; private set; }
         public Vec2i MousePosition { get; set; }
+
+        /// <summary>
+        /// A dialog is the root of its tree, so <see cref="UIControl.IsVisible"/> means "on
+        /// screen" here rather than "part of my parent". The two are the same statement one
+        /// level apart, which is why this reuses the inherited property instead of shadowing
+        /// it - a control asking whether it is visible would otherwise get an answer that
+        /// stopped at the dialog.
+        ///
+        /// Assigning it runs the full <see cref="Show"/> / <see cref="Hide"/> bookkeeping:
+        /// registering with the <see cref="Input.UIManager"/>, laying out, and telling the
+        /// subtree. Setting a flag without that would leave a dialog drawn but unrouted.
+        /// </summary>
+        protected override void SetVisibleCore(bool value)
+        {
+            if (value)
+            {
+                Show();
+            }
+            else
+            {
+                Hide();
+            }
+        }
+
+        /// <summary>
+        /// True while a layout pass of this dialog is running. Read by
+        /// <see cref="UIControl.RecomposeToMain"/> to refuse a pass started from inside another
+        /// one; see the comment there for why that can happen at all.
+        /// </summary>
+        internal bool IsLayingOut { get; private set; }
 
         /// <summary>
         /// While this dialog is open the mouse cursor is released and world interaction is
@@ -119,6 +148,12 @@ namespace IS2Mod.ControlTypes.Custom
             DialogRenderLayer _Layer = DialogRenderLayer.Normal)
             : base(_Orientation: Orientation.Top, _Margin: 0, _Padding: 10)
         {
+            // A control is visible by default, a dialog is not: it exists from the moment it is
+            // constructed and goes on screen when Show() is called. The field is written
+            // directly because the property would call Hide(), which is not a thing to do to a
+            // dialog that was never shown.
+            SetVisibleField(false);
+
             Dialog = this;
             DialogName = _DialogName;
             Title = _Title;
@@ -268,7 +303,22 @@ namespace IS2Mod.ControlTypes.Custom
             if (IsVisible)
                 return;
 
-            IsVisible = true;
+            // SetVisibleField rather than the property: the property routes back here.
+            //
+            // Bracketed by the layout flag because IsVisible is one of the properties that asks
+            // for a layout pass, and from this line on the answer is yes - so the notification
+            // would run one, and then Show() would run a second. Opening a dialog is one layout
+            // pass, and this is the line that keeps it that way.
+            IsLayingOut = true;
+
+            try
+            {
+                SetVisibleField(true);
+            }
+            finally
+            {
+                IsLayingOut = false;
+            }
 
             PerformLayout();
 
@@ -291,7 +341,7 @@ namespace IS2Mod.ControlTypes.Custom
             if (!IsVisible)
                 return;
 
-            IsVisible = false;
+            SetVisibleField(false);
 
             // Drop stale hover/press state so a reopened dialog does not start out believing the
             // cursor is still on the control it was on when it closed.
@@ -372,20 +422,53 @@ namespace IS2Mod.ControlTypes.Custom
             // the two can no longer get out of step.
             _needsRedraw = true;
 
-            // The arrange pass resets the root position to 0/0, so the on screen position has
-            // to be re-applied afterwards either way.
-            base.PerformLayout();
+            IsLayingOut = true;
 
-            ClampToScreen();
+            try
+            {
+                // The arrange pass resets the root position to 0/0, so the on screen position
+                // has to be re-applied afterwards either way.
+                base.PerformLayout();
 
-            if (AutoCenter)
-            {
-                CenterOnScreen();
+                ClampToScreen();
+
+                if (AutoCenter)
+                {
+                    CenterOnScreen();
+                }
+                else
+                {
+                    Position = _requestedPosition;
+                }
             }
-            else
+            finally
             {
-                Position = _requestedPosition;
+                IsLayingOut = false;
             }
+
+            DropFocusIfUnreachable();
+        }
+
+        /// <summary>
+        /// Takes the focus off a control that can no longer hold it.
+        ///
+        /// Hiding or disabling the focused control is an ordinary thing to do from a handler -
+        /// "save is only available once the name is filled in" - and leaving the focus on it
+        /// would strand the keyboard: the control is out of the tab order, so Tab could not
+        /// move away from it either. Run after the layout rather than from the property setter
+        /// so that a batch of changes settles first.
+        /// </summary>
+        private void DropFocusIfUnreachable()
+        {
+            UIControl? focused = FocusedControl;
+
+            if (focused == null)
+                return;
+
+            if (focused.CanTakeFocus && focused.IsEffectivelyVisible && focused.IsEffectivelyEnabled)
+                return;
+
+            FocusControl(null);
         }
 
         /// <summary>
@@ -517,26 +600,46 @@ namespace IS2Mod.ControlTypes.Custom
                    screenY <= Position.Y + Size.Y;
         }
 
+        /// <summary>
+        /// The control an event may actually be raised on, given what the hit test found.
+        ///
+        /// A disabled control is hit - it covers what is behind it, so the click stops there -
+        /// but it does not react, and neither does anything inside it. Separating the two
+        /// answers is what lets a click on a disabled button be swallowed by the dialog without
+        /// the button lighting up or firing.
+        /// </summary>
+        private static UIControl? InteractiveTarget(UIControl? hit)
+        {
+            if (hit == null || !hit.IsEffectivelyEnabled)
+                return null;
+
+            return hit;
+        }
+
         public void HandleMouseDown(MouseEvent e)
         {
             if (!IsVisible)
                 return;
 
-            UIControl? clickedControl = HitTest(e.X, e.Y);
+            UIControl? hit = HitTest(e.X, e.Y);
+            UIControl? clickedControl = InteractiveTarget(hit);
+
             pressedControl = clickedControl;
 
             // Clicking a focusable control gives it the keyboard, the way every desktop UI
             // does it. Clicking anything else - the background, the title bar - deliberately
             // leaves focus where it was instead of clearing it, so dragging a dialog around
             // does not cost the player their place in the tab order.
-            if (clickedControl != null && clickedControl.IsFocusable)
+            if (clickedControl != null && clickedControl.CanTakeFocus)
             {
                 FocusControl(clickedControl);
             }
 
             clickedControl?.InvokeEventMouseDown(e);
 
-            if (clickedControl != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
+            // The disabled control counts here: the click landed on the dialog and must not
+            // reach the world behind it.
+            if (hit != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
             {
                 e.Handled = true;
             }
@@ -584,7 +687,8 @@ namespace IS2Mod.ControlTypes.Custom
                 return;
             }
 
-            UIControl? releasedControl = HitTest(e.X, e.Y);
+            UIControl? hit = HitTest(e.X, e.Y);
+            UIControl? releasedControl = InteractiveTarget(hit);
 
             releasedControl?.InvokeEventMouseUp(e);
 
@@ -596,7 +700,7 @@ namespace IS2Mod.ControlTypes.Custom
 
             pressedControl = null;
 
-            if (releasedControl != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
+            if (hit != null || (IsModal && ContainsScreenPoint(e.X, e.Y)))
             {
                 e.Handled = true;
             }
@@ -617,7 +721,12 @@ namespace IS2Mod.ControlTypes.Custom
                 return;
             }
 
-            UIControl? controlUnderMouse = HitTest(e.X, e.Y);
+            UIControl? hit = HitTest(e.X, e.Y);
+
+            // A disabled control never hovers, so moving onto one has to read as leaving the
+            // last control rather than as arriving somewhere - otherwise the control the cursor
+            // came from would keep its hover look until the cursor found an enabled one.
+            UIControl? controlUnderMouse = InteractiveTarget(hit);
 
             if (!ReferenceEquals(controlUnderMouse, currentlyHovered))
             {
@@ -872,6 +981,15 @@ namespace IS2Mod.ControlTypes.Custom
         /// </summary>
         public void FocusControl(UIControl? control)
         {
+            // Refuse what cannot hold focus rather than silently accepting it. A hidden or
+            // disabled control is not in the tab order, so focusing it from code would leave
+            // the keyboard somewhere Tab cannot get out of.
+            if (control != null &&
+                !(control.CanTakeFocus && control.IsEffectivelyVisible && control.IsEffectivelyEnabled))
+            {
+                return;
+            }
+
             if (ReferenceEquals(FocusedControl, control))
                 return;
 

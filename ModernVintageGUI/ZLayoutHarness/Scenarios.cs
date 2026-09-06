@@ -29,6 +29,24 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "cross-axis-alignment",
+                Description = "A control's own Orientation across its parent's stacking "
+                            + "direction: a column where four controls fill, sit left, centre "
+                            + "and sit right, and a row where three do the same vertically.",
+                Build = BuildCrossAxisAlignment
+            };
+
+            yield return new Scenario
+            {
+                Name = "enabled-and-hidden",
+                Description = "Two rows of the same three controls. In the first the middle one "
+                            + "is disabled - it keeps its place and is washed out. In the second "
+                            + "it is hidden, so the row closes up and is one control narrower.",
+                Build = BuildEnabledAndHidden
+            };
+
+            yield return new Scenario
+            {
                 Name = "fixed-size-container",
                 Description = "A container with IsAutoSize = false that has children. Measuring " +
                               "used to fold its own size plus the children plus the padding back " +
@@ -280,7 +298,7 @@ namespace LayoutHarness
 
             // The control that collapsed to 0 x 0 from the second layout pass onwards.
             var label = new TextLabelControl("Test", _Name: "label");
-            label.Orientation = TextOrientation.Center;
+            label.TextAlign = TextOrientation.Center;
             row.Children.Add(label);
 
             var rowButton3 = new ButtonControl(_Name: "row3");
@@ -292,6 +310,118 @@ namespace LayoutHarness
             row.Children.Add(rowButton4);
 
             root.Children.Add(row);
+
+            return root;
+        }
+
+        /// <summary>
+        /// The four alignments in a column and three of them in a row. The column is given a
+        /// fixed width and the row a fixed height, because alignment across an axis only means
+        /// anything when there is free space on it to be aligned in.
+        /// </summary>
+        private static RectangleControl BuildCrossAxisAlignment()
+        {
+            RectangleControl root = CreateRoot();
+
+            var column = new RectangleControl(_Name: "column");
+            column.InsideOrientation = Orientation.Top;
+            column.Padding = 6;
+            column.Size = new PointD(280, 0);
+            column.IsAutoSize = false;
+
+            foreach ((string caption, Orientation align) in new[]
+            {
+                ("Fill - stretched", Orientation.Fill),
+                ("Left", Orientation.Left),
+                ("Center", Orientation.Center),
+                ("Right", Orientation.Right),
+            })
+            {
+                column.Children.Add(new ButtonControl(_Name: "col-" + caption)
+                {
+                    Text = caption,
+                    Orientation = align
+                });
+            }
+
+            // Height from the children, width from the author: the column has to be wider than
+            // its widest child or there is nothing to align in.
+            column.Size = new PointD(280, 220);
+
+            root.Children.Add(column);
+
+            var row = new RectangleControl(_Name: "row");
+            row.InsideOrientation = Orientation.Left;
+            row.Padding = 6;
+            row.Size = new PointD(0, 120);
+            row.IsAutoSize = false;
+            row.Size = new PointD(300, 120);
+
+            foreach ((string caption, Orientation align) in new[]
+            {
+                ("Fill", Orientation.Fill),
+                ("Top", Orientation.Top),
+                ("Center", Orientation.Center),
+                ("Bottom", Orientation.Bottom),
+            })
+            {
+                row.Children.Add(new ButtonControl(_Name: "row-" + caption)
+                {
+                    Text = caption,
+                    Orientation = align
+                });
+            }
+
+            root.Children.Add(row);
+
+            return root;
+        }
+
+        /// <summary>
+        /// The difference between disabled and hidden, side by side, because it is the one
+        /// thing about the two that has to be obvious at a glance: a disabled control is still
+        /// in the row, a hidden one is not.
+        /// </summary>
+        private static RectangleControl BuildEnabledAndHidden()
+        {
+            RectangleControl root = CreateRoot();
+
+            static RectangleControl Row(string name, Action<ButtonControl, CheckboxControl> arrange)
+            {
+                var row = new RectangleControl(_Name: name);
+                row.InsideOrientation = Orientation.Left;
+                row.Padding = 4;
+
+                var first = new ButtonControl(_Name: name + "-first") { Text = "Enabled" };
+                var middle = new ButtonControl(_Name: name + "-middle") { Text = "Middle" };
+                var box = new CheckboxControl(_Name: name + "-box") { Text = "A checkbox" };
+
+                row.Children.Add(first);
+                row.Children.Add(middle);
+                row.Children.Add(box);
+
+                arrange(middle, box);
+
+                return row;
+            }
+
+            root.Children.Add(new TextLabelControl("disabled - keeps its place", _Name: "capDisabled"));
+            root.Children.Add(Row("disabledRow", (middle, box) =>
+            {
+                middle.IsEnabled = false;
+                box.IsEnabled = false;
+            }));
+
+            root.Children.Add(new TextLabelControl("hidden - the row closes up", _Name: "capHidden"));
+            root.Children.Add(Row("hiddenRow", (middle, _) => middle.IsVisible = false));
+
+            // A whole disabled container, to show that the wash is drawn once over the group
+            // rather than once per control in it.
+            root.Children.Add(new TextLabelControl("a disabled container", _Name: "capPanel"));
+
+            RectangleControl panel = Row("panelRow", (_, _) => { });
+            panel.IsEnabled = false;
+            root.Children.Add(panel);
 
             return root;
         }
@@ -311,7 +441,7 @@ namespace LayoutHarness
             fixedBox.IsAutoSize = false;
 
             var inner = new TextLabelControl("Fixed 240x120", _Name: "innerLabel");
-            inner.Orientation = TextOrientation.MiddleCenter;
+            inner.TextAlign = TextOrientation.MiddleCenter;
             fixedBox.Children.Add(inner);
 
             root.Children.Add(fixedBox);
@@ -853,7 +983,7 @@ namespace LayoutHarness
             root.Children.Add(wide);
 
             var label = new TextLabelControl("short", _Name: "stretchedLabel");
-            label.Orientation = TextOrientation.Center;
+            label.TextAlign = TextOrientation.Center;
             root.Children.Add(label);
 
             return root;

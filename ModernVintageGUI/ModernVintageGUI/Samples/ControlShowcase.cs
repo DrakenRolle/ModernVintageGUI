@@ -466,7 +466,7 @@ namespace ModernVintageGUI.Samples
 
             var middle = new TextLabelControl("between", _Name: "rowLabel")
             {
-                Orientation = TextOrientation.Center
+                TextAlign = TextOrientation.Center
             };
             row.Children.Add(middle);
 
@@ -475,6 +475,9 @@ namespace ModernVintageGUI.Samples
             row.Children.Add(right);
 
             column.Children.Add(row);
+
+            column.Children.Add(Heading("Enabled and visible"));
+            column.Children.Add(BuildEnabledAndVisible());
 
             column.Children.Add(Heading("Context menu"));
 
@@ -489,6 +492,61 @@ namespace ModernVintageGUI.Samples
             column.Children.Add(BuildItemDropdown(capi));
 
             return column;
+        }
+
+        /// <summary>
+        /// The two states a control can be in besides normal, and a switch that puts a live
+        /// dialog into them - which is the part worth having in the game rather than only in a
+        /// rendered picture. Toggling these is what proves that the dialog re-lays out and
+        /// redraws itself off nothing but a property assignment.
+        /// </summary>
+        private static UIControl BuildEnabledAndVisible()
+        {
+            var group = new RectangleControl(_Name: "stateGroup")
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            var row = new RectangleControl(_Name: "stateRow")
+            {
+                InsideOrientation = Orientation.Left
+            };
+
+            var target = new ButtonControl(_Name: "stateTarget") { Text = "Target" };
+            var neighbour = new ButtonControl(_Name: "stateNeighbour") { Text = "Neighbour" };
+
+            row.Children.Add(target);
+            row.Children.Add(neighbour);
+            group.Children.Add(row);
+
+            var toggles = new RectangleControl(_Name: "stateToggles")
+            {
+                InsideOrientation = Orientation.Left
+            };
+
+            var enable = new CheckboxControl(_Name: "stateEnabled")
+            {
+                Text = "Enabled",
+                IsChecked = true
+            };
+
+            // No Refresh() call anywhere in here on purpose: assigning IsEnabled or IsVisible
+            // is what asks for the redraw and, for the second, for the layout pass as well.
+            enable.CheckedChanged += (_, isChecked) => target.IsEnabled = isChecked;
+
+            var visible = new CheckboxControl(_Name: "stateVisible")
+            {
+                Text = "Visible",
+                IsChecked = true
+            };
+
+            visible.CheckedChanged += (_, isChecked) => target.IsVisible = isChecked;
+
+            toggles.Children.Add(enable);
+            toggles.Children.Add(visible);
+            group.Children.Add(toggles);
+
+            return group;
         }
 
         /// <summary>A plain list of captions, the everyday case.</summary>

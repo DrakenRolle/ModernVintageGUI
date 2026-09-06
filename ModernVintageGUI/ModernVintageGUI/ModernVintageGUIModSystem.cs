@@ -211,7 +211,7 @@ namespace ModernVintageGUI
             rect.Children.Add(button23);
 
             var txt = new TextLabelControl("Test", _Name: "saveButton2");
-            txt.Orientation = TextOrientation.Center;
+            txt.TextAlign = TextOrientation.Center;
             rect.Children.Add(txt);
 
             var button234 = new ButtonControl(_Name: "saveButton2");
