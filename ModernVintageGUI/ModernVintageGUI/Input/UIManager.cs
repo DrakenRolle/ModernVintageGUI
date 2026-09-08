@@ -26,6 +26,12 @@ namespace IS2Mod.Input
         /// </summary>
         public static UIManager? Current { get; private set; }
 
+        /// <summary>
+        /// Every dialog that is shown right now, popups included, bottom-most first. Read by the
+        /// screenshot automation to know what to crop a picture to.
+        /// </summary>
+        public IReadOnlyList<CustomDialogElement> OpenDialogs => _openDialogs;
+
         /// <summary>The client setting the GUI scale slider writes to.</summary>
         private const string GuiScaleSettingKey = "guiScale";
 

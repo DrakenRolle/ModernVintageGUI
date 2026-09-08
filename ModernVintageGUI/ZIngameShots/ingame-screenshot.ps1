@@ -5,9 +5,10 @@ Starts Vintage Story with the mod, opens the world in the Saves folder, runs a s
 
 .DESCRIPTION
 The in-game half lives in ModernVintageGUI/Automation/AutoScreenshot.cs. This script builds the
-mod, starts the game with --openWorld and the two environment variables that half reads
-(MVGUI_AUTOSHOT = the step script, MVGUI_AUTOSHOT_OUT = the output directory), and waits for the
-done file the run writes when it is through. The pictures are full window captures, so dropdown
+mod, starts the game with --openWorld and the environment variables that half reads
+(MVGUI_AUTOSHOT = the step script, MVGUI_AUTOSHOT_OUT = the output directory, MVGUI_AUTOSHOT_SKIP =
+sections of the script to leave out), and waits for the done file the run writes when it is
+through. The pictures are full window captures, so dropdown
 lists and context menus - which draw outside the dialog they belong to - are in them.
 
 Step reference: see steps\showcase.txt or the header of AutoScreenshot.cs.
@@ -31,6 +32,10 @@ How long to wait for the script to finish before the game is killed. Default: 30
 .PARAMETER NoBuild
 Use the mod as it is in bin\ instead of building it first.
 
+.PARAMETER Skip
+Names of sections of the step script to leave out, as in "-Skip pictures" for a scene that is
+only built to be walked around in. A section is what a "section NAME" line in the script starts.
+
 .PARAMETER KeepOpen
 Leave the game running after the script - for looking at what the pictures show. Without this
 a "quit" is appended to scripts that do not end with one. Steps written "onquit STEP" run only
@@ -47,6 +52,11 @@ stays standing in a game that is kept open.
 .\ingame-screenshot.ps1 -Steps ..\CopperCasing\docs\screenshots\coppercasing.txt -Out ..\CopperCasing\docs\images\ingame -NoBuild -KeepOpen
 What the "Test world (keep open)" launch profile of the CopperCasing project runs, after Visual
 Studio has built both mods.
+
+.EXAMPLE
+.\ingame-screenshot.ps1 -Steps ..\CopperCasing\docs\screenshots\coppercasing.txt -Out ..\CopperCasing\docs\images\ingame -NoBuild -KeepOpen -Skip pictures
+The "Test world (walk around)" profile: the scene is built and the game left open on it, without
+the pictures in between.
 #>
 [CmdletBinding()]
 param(
@@ -55,6 +65,7 @@ param(
     [string]$World,
     [string]$Configuration = 'Debug',
     [int]$TimeoutSec = 300,
+    [string[]]$Skip = @(),
     [switch]$NoBuild,
     [switch]$KeepOpen
 )
@@ -142,11 +153,13 @@ Remove-Item -Path $doneFile, $runLog -Force -ErrorAction SilentlyContinue
 
 Write-Host "World:  $World"
 Write-Host "Steps:  $Steps"
+if ($Skip.Count -gt 0) { Write-Host "Skip:   $($Skip -join ', ')" }
 Write-Host "Output: $Out"
 
 $started = Get-Date
 $env:MVGUI_AUTOSHOT = $runSteps
 $env:MVGUI_AUTOSHOT_OUT = $Out
+if ($Skip.Count -gt 0) { $env:MVGUI_AUTOSHOT_SKIP = ($Skip -join ',') }
 try {
     $arguments = @(
         '--openWorld', ('"{0}"' -f $World),
@@ -156,7 +169,7 @@ try {
     $game = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $vs -PassThru
 }
 finally {
-    Remove-Item -Path Env:\MVGUI_AUTOSHOT, Env:\MVGUI_AUTOSHOT_OUT -ErrorAction SilentlyContinue
+    Remove-Item -Path Env:\MVGUI_AUTOSHOT, Env:\MVGUI_AUTOSHOT_OUT, Env:\MVGUI_AUTOSHOT_SKIP -ErrorAction SilentlyContinue
 }
 Write-Host "Game started (pid $($game.Id)), waiting up to $TimeoutSec s for the script to finish..."
 

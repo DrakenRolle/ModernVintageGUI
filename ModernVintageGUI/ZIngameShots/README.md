@@ -21,13 +21,15 @@ is what this is for.
 A dropdown list, a context menu and a tooltip are dialogs of their own in the overlay band, not
 children of the dialog they belong to. A picture of the dialog's own surface would not have them
 in it. So the capture reads the default framebuffer at the end of the frame, exactly the way the
-game's F12 does: world, HUD, dialog, popups, everything.
+game's F12 does: world, HUD, dialog, popups, everything - except the player's own body: the
+immersive first person mode is switched off for the run and put back afterwards, or an arm
+would swing into the frame after every teleport.
 
 ## Two halves
 
 * [ingame-screenshot.ps1](ingame-screenshot.ps1) - builds, starts, waits, reports. `-Steps`,
-  `-Out`, `-World`, `-Configuration`, `-TimeoutSec`, `-NoBuild`, `-KeepOpen`; `Get-Help` on the
-  script has the details.
+  `-Out`, `-World`, `-Configuration`, `-TimeoutSec`, `-NoBuild`, `-KeepOpen`, `-Skip`; `Get-Help`
+  on the script has the details.
 * [AutoScreenshot.cs](../ModernVintageGUI/Automation/AutoScreenshot.cs) in the mod - reads the
   step script named by `MVGUI_AUTOSHOT`, waits for the world to be there, runs the steps at the
   end of each rendered frame and writes `autoshot.done` into `MVGUI_AUTOSHOT_OUT` when it is
@@ -48,12 +50,16 @@ One per line, `#` starts a comment.
 | `wait 90` | waits 90 rendered frames; `wait 2s` and `wait 500ms` wait by the clock |
 | `open` | opens the showcase dialog - the same one the J hotkey opens |
 | `close` | hides it |
-| `shot name.png` | saves a picture into the output directory |
+| `shot name.png` | saves a picture of the whole window into the output directory |
+| `shot name.png crop` | the same, cut down to the dialogs on screen - popups included; `crop 24` leaves 24 pixels around them |
 | `dropdown NAME` | opens the dropdown with that `Name`; `dropdown NAME close` closes it |
 | `menu OWNER` | shows the context menu attached to the control with that `Name`; `menu OWNER close` hides it |
 | `hover NAME` | moves the cursor onto the middle of a control |
 | `click NAME` | presses and releases the left button there |
+| `tab NAME 1` | switches the tabs control with that `Name` to its second page |
+| `chat off` | hides the vanilla chat window, which sits where a popup hangs out of a centred dialog; `chat on` brings it back, and a run that leaves the game open does that itself |
 | `cmd LINE` | sends a chat line as the player would type it: `/...` goes to the server, `.…` runs a client command |
+| `section NAME` | not a step: names the steps after it, up to the next `section` line, so that `-Skip NAME` can leave them out; a name may recur |
 | `onquit STEP` | runs the step only when the script ends with a `quit`: the teardown of a scene, which a run that keeps the game open for a look at it skips |
 | `quit` | leaves the world and closes the game |
 
@@ -87,13 +93,15 @@ The same lines are in the game's `client-main.log`, prefixed `[ModernVintageGUI 
 
 ## From Visual Studio
 
-The CopperCasing project has two launch profiles that run this pipeline on its scene, for
+The CopperCasing project has three launch profiles that run this pipeline on its scene, for
 `Ctrl+F5` from the profile dropdown:
 
 * **Test world (keep open)** builds the scene, takes the pictures and leaves the game standing
   in it, the player in front of the whole scene, for walking around in it.
 * **Test world (quit)** is the same run, after which the scene is taken down, the world saved and
   the game closed.
+* **Test world (walk around)** builds the scene and leaves the game open on the lookout without
+  taking a single picture: `-Skip pictures` leaves the `section pictures` parts of the script out.
 
-Both hand the pipeline `-NoBuild`, because Visual Studio has just built both mods, put the pictures
-into `CopperCasing/docs/images/ingame`, and keep their console open with the list of them.
+All three hand the pipeline `-NoBuild`, because Visual Studio has just built both mods, put the
+pictures into `CopperCasing/docs/images/ingame`, and keep their console open with the list of them.

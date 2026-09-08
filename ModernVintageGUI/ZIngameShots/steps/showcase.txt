@@ -6,10 +6,13 @@
 #             open              the showcase dialog
 #             close             hides it again
 #             shot FILE         full window capture into the output directory (.png)
+#             shot FILE crop    the same, cut down to the dialogs on screen, popups included ("crop 24" adds a margin)
 #             dropdown NAME     opens the dropdown with that Name; "dropdown NAME close" closes it
 #             menu OWNER        shows the context menu attached to that control; "menu OWNER close" hides it
 #             hover NAME        moves the cursor onto a control
 #             click NAME        presses and releases the left button on a control
+#             tab NAME INDEX    switches a tabs control to a page
+#             chat off|on       hides the vanilla chat window, or brings it back
 #             quit              leaves the world - which saves it - and closes the game
 #
 # The pipeline appends "quit" when a script does not end with one (unless -KeepOpen).

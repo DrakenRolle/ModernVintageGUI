@@ -1,0 +1,37 @@
+# The pictures for the README and the wiki: the showcase in the game, cut down to the dialog
+# and whatever hangs out of it - a dropdown list, a menu with its sub menu, the icon page.
+#
+# Run with:   ZIngameShots\ingame-screenshot.ps1 -Steps .\steps\docs.txt
+#
+# then copy the ingame-*.png from out\ into docs\images. The wiki links to them on master, so
+# they show there once the repo is pushed.
+
+wait 2s
+chat off                    # it sits where the popups below hang out of the dialog
+open
+wait 10
+shot ingame-showcase.png crop
+
+dropdown textDropdown
+wait 5
+shot ingame-dropdown.png crop
+dropdown textDropdown close
+
+dropdown itemDropdown       # item stacks, drawn with the game's own icons
+wait 5
+shot ingame-dropdown-items.png crop
+dropdown itemDropdown close
+
+menu menuButton
+wait 5
+click More                  # opens the sub menu, which cascades to the side
+wait 5
+shot ingame-context-menu.png crop
+menu menuButton close
+
+tab tabs 1                  # the icon gallery page
+wait 5
+shot ingame-icons.png crop
+tab tabs 0
+
+chat on

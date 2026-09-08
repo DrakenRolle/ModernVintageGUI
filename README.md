@@ -4,10 +4,11 @@ This is an approach to fix the current GUI system for Vintage Story.
 The core idea of this framework is a stack-container based way to structure and maintain a user
 interface. For now I call it **Modern Vintage Story UI**, or **MVS_UI** for short.
 
-<img src="docs/images/readme-showcase.png" alt="A dialog showing every control: labels, buttons, a context menu, dropdowns, an inventory grid, a checkbox, a text field, a progress bar, tabs, a colour picker and a pixel canvas" />
+<img src="docs/images/ingame-showcase.png" alt="A dialog in the game showing every control: labels, buttons, a context menu, dropdowns, an inventory grid with items in it, a checkbox, a text field, a progress bar, tabs, a colour picker, a 3D shape viewer and a pixel canvas" />
 
-*Every control in one dialog. This picture is rendered from the same code the test hotkey opens
-in game, so it cannot show a screen that no longer exists.*
+*Every control in one dialog, photographed in the game. The
+[screenshot pipeline](ModernVintageGUI/ZIngameShots/README.md) opens the same dialog the test hotkey
+opens and takes the picture, so it cannot show a screen that no longer exists.*
 
 > **Full documentation:** the [wiki](https://github.com/DrakenRolle/ModernVintageGUI/wiki) - every
 > control in detail, the layout rules, GUI scale, events, focus and depth, and how to write your
@@ -243,7 +244,7 @@ button.Clicked += (sender, e) => menu.Toggle();
 menu.ItemActivated += (sender, e) => capi.ShowChatMessage(string.Join(" > ", e.Path.Select(i => i.Text)));
 ```
 
-<img src="docs/images/readme-context-menu-hover.png" alt="A context menu with an entry hovered" />
+<img src="docs/images/ingame-context-menu.png" alt="The context menu open in the game, its More entry cascading into a sub menu, both hanging out below the dialog" />
 
 <h2>Inventories</h2>
 
@@ -324,6 +325,8 @@ dropdown.SelectionChanged += (s, e) => capi.ShowChatMessage(e.Value?.ToString())
 A list built from item stacks draws itself like the handbook's Blocks and Items page and brings
 the game's item tooltip with it. `MaxVisibleItems` and `MaxListHeight` decide when it starts
 scrolling - both unlimited by default, and the list is always cut down to what fits on screen.
+
+<img src="docs/images/ingame-dropdown-items.png" alt="An item picker open in the game: the list hangs out below the dialog, every entry drawn with the game's own icon" />
 
 The rows are banded and separated by a hairline, and the picked one keeps a bar on its leading
 edge - so "where the cursor is" and "what is picked" stay two different things to look at while
@@ -525,6 +528,8 @@ var button = new ButtonControl { Text = "Settings", IconName = "gear" };
 running game rather than from a list written down here, plus anything registered. The showcase has
 a gallery of them under the "Icons" tab, because a name does not tell you what an icon looks like.
 
+<img src="docs/images/ingame-icons.png" alt="The showcase's icon page in the game: every built in icon on a button, with its name beside it" />
+
 <h2>Editing the UI after it was opened</h2>
 
 Adding or removing a child relays out and redraws the dialog it belongs to. You do not have to close
@@ -605,8 +610,8 @@ axes and at two GUI scales, that hiding collapses while disabling does not and t
 reached by Tab or by the mouse, and that a layout pass writes no property that would ask for another
 layout pass.
 
-Every picture in this README is rendered by the same harness through the real drawing code, so they
-can be regenerated instead of re-screenshotted:
+The small pictures in this README are rendered by the same harness through the real drawing code,
+so they can be regenerated instead of re-screenshotted:
 
 ```
 dotnet run --project ModernVintageGUI/ZLayoutHarness -- --docs docs/images
@@ -617,8 +622,10 @@ patches, the real mouse grab, focus and depth against vanilla dialogs, and GPU u
 
 For those there is the in-game pipeline in `ZIngameShots`: it builds the mod, starts the game on
 the world in the Saves folder, opens the showcase, pulls a dropdown and a menu open, photographs the
-whole window each time and closes the game again - no hands. [ZIngameShots/README.md](ModernVintageGUI/ZIngameShots/README.md)
-has the step script format.
+whole window each time and closes the game again - no hands. The in-game pictures in this README -
+the showcase at the top, the open dropdowns, the menu, the icon page - are its `stepsdocs.txt` run,
+cut down to the dialog and whatever hangs out of it.
+[ZIngameShots/README.md](ModernVintageGUI/ZIngameShots/README.md) has the step script format.
 
 ```
 ModernVintageGUI/ZIngameShots/ingame-screenshot.ps1
