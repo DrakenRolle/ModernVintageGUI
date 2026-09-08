@@ -20,6 +20,7 @@ namespace ModernVintageGUI
     {
         public const string HarmonyId = "modernvintagegui";
         private const string TestDialogHotkey = "mvgui_testdialog";
+        private const string SampleGalleryHotkey = "mvgui_samples";
 
         /// <summary>
         /// The showcase inventory. The class name is half of the inventory id - the other half
@@ -37,6 +38,10 @@ namespace ModernVintageGUI
         private Harmony? harmony;
         private UIManager? uiManager;
         private CustomDialogElement? dialog;
+
+        /// <summary>The sample gallery and the sample windows opened from it, by sample id.</summary>
+        private CustomDialogElement? galleryDialog;
+        private readonly Dictionary<string, CustomDialogElement> sampleDialogs = new Dictionary<string, CustomDialogElement>();
         private ModInventoryAccess? showcaseInventory;
         private ModInventorySystem? inventorySystem;
         private AutoScreenshot? autoShot;
@@ -87,6 +92,10 @@ namespace ModernVintageGUI
             api.Input.RegisterHotKey(TestDialogHotkey, "Toggle ModernVintageGUI test dialog", GlKeys.J, HotkeyType.GUIOrOtherControls);
             api.Input.SetHotKeyHandler(TestDialogHotkey, OnDialogHotkey);
 
+            // The example windows, one hotkey over: a gallery with a button per sample.
+            api.Input.RegisterHotKey(SampleGalleryHotkey, "Toggle ModernVintageGUI sample windows", GlKeys.K, HotkeyType.GUIOrOtherControls);
+            api.Input.SetHotKeyHandler(SampleGalleryHotkey, OnSampleGalleryHotkey);
+
             RegisterCommands(api);
 
             // The screenshot pipeline: only when the environment asks for it, and then it waits
@@ -109,6 +118,8 @@ namespace ModernVintageGUI
         /// <c>.mvsui autoshot &lt;script&gt; [output dir]</c> - runs a screenshot step script in
         /// the open world, the same one the pipeline in ZIngameShots runs from outside, so a
         /// script can be tried without restarting the game.
+        ///
+        /// <c>.mvsui sample [id]</c> - opens one of the example windows by id, or lists them.
         /// </summary>
         private void RegisterCommands(ICoreClientAPI api)
         {
@@ -124,7 +135,78 @@ namespace ModernVintageGUI
                 .WithDescription("Run a screenshot step script in this world")
                 .WithArgs(api.ChatCommands.Parsers.Word("script"), api.ChatCommands.Parsers.OptionalWord("output"))
                 .HandleWith(OnAutoshotCommand)
+                .EndSubCommand()
+                .BeginSubCommand("sample")
+                .WithDescription("Open one of the example windows, or list them")
+                .WithArgs(api.ChatCommands.Parsers.OptionalWord("id"))
+                .HandleWith(OnSampleCommand)
                 .EndSubCommand();
+        }
+
+        private TextCommandResult OnSampleCommand(TextCommandCallingArgs args)
+        {
+            if (clientApi == null)
+                return TextCommandResult.Error("No client.");
+
+            string? id = args.Parsers[0].IsMissing ? null : (string?)args.Parsers[0].GetValue();
+
+            if (string.IsNullOrEmpty(id))
+            {
+                var names = new List<string>();
+
+                foreach (Samples.SampleWindow sample in Samples.SampleGallery.All)
+                {
+                    names.Add(sample.Id);
+                }
+
+                return TextCommandResult.Success("Samples: " + string.Join(", ", names) + " - or press K for the gallery.");
+            }
+
+            Samples.SampleWindow? wanted = Samples.SampleGallery.Find(id);
+
+            if (wanted == null)
+                return TextCommandResult.Error("No sample called '" + id + "'.");
+
+            OpenSample(wanted);
+
+            return TextCommandResult.Success("Opened " + wanted.Title);
+        }
+
+        private bool OnSampleGalleryHotkey(KeyCombination keyCombination)
+        {
+            if (clientApi == null)
+                return false;
+
+            galleryDialog ??= Samples.SampleGallery.CreateGalleryDialog(clientApi, OpenSample);
+            galleryDialog.Toggle();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Shows a sample window, building its dialog on the first open and reusing it after.
+        /// One dialog per sample, so two different samples can be open side by side while the
+        /// same one is not opened twice.
+        /// </summary>
+        private void OpenSample(Samples.SampleWindow sample)
+        {
+            if (clientApi == null)
+                return;
+
+            if (!sampleDialogs.TryGetValue(sample.Id, out CustomDialogElement? sampleDialog))
+            {
+                sampleDialog = Samples.SampleGallery.CreateDialog(clientApi, sample);
+                sampleDialogs[sample.Id] = sampleDialog;
+            }
+
+            if (!sampleDialog.IsVisible)
+            {
+                sampleDialog.Show();
+            }
+            else
+            {
+                UIManager.Current?.FocusDialog(sampleDialog);
+            }
         }
 
         private TextCommandResult OnAutoshotCommand(TextCommandCallingArgs args)
@@ -331,6 +413,16 @@ namespace ModernVintageGUI
 
             dialog?.Dispose();
             dialog = null;
+
+            galleryDialog?.Dispose();
+            galleryDialog = null;
+
+            foreach (CustomDialogElement sampleDialog in sampleDialogs.Values)
+            {
+                sampleDialog.Dispose();
+            }
+
+            sampleDialogs.Clear();
 
             uiManager?.Dispose();
             uiManager = null;

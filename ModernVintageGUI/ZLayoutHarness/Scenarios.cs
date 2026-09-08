@@ -2,6 +2,7 @@ using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
+using ModernVintageGUI.Samples;
 using Vintagestory.API.Client;
 using System;
 using System.Collections.Generic;
@@ -228,6 +229,68 @@ namespace LayoutHarness
                               "it to the full content width; the next measure pass must still " +
                               "start from the text, not from the width it was stretched to.",
                 Build = BuildStretchedLabel
+            };
+
+            yield return new Scenario
+            {
+                Name = "split-panel",
+                Description = "Three panels side by side with two grab bars between them, at a " +
+                              "quarter, a half and a quarter. Panels and bars have to add up to " +
+                              "the box exactly and the shares have to survive the GUI scale.",
+                Build = () => BuildSplitPanel(Orientation.Left)
+            };
+
+            yield return new Scenario
+            {
+                Name = "split-panel-stacked",
+                Description = "The same three panels stacked, so the bars run horizontally.",
+                Build = () => BuildSplitPanel(Orientation.Top)
+            };
+
+            yield return new Scenario
+            {
+                Name = "sample-gallery",
+                Description = "The gallery the K hotkey opens: a button and a line per sample.",
+                Build = () => BuildSample((parent, capi) => SampleGallery.BuildGallery(parent, open: null))
+            };
+
+            yield return new Scenario
+            {
+                Name = "sample-confirm",
+                Description = "Sample window 1: a question and two buttons.",
+                Build = () => BuildSample(ConfirmSample.Build)
+            };
+
+            yield return new Scenario
+            {
+                Name = "sample-settings",
+                Description = "Sample window 2: a settings form with groups, a dropdown, a text " +
+                              "field and a value with buttons either side.",
+                Build = () => BuildSample(SettingsSample.Build)
+            };
+
+            yield return new Scenario
+            {
+                Name = "sample-explorer",
+                Description = "Sample window 3: tree, list and details in a three way split, " +
+                              "over a log in a stacked split.",
+                Build = () => BuildSample(ExplorerSample.Build)
+            };
+
+            yield return new Scenario
+            {
+                Name = "sample-workshop",
+                Description = "Sample window 4: a crafting station with slots, a 3D preview, " +
+                              "progress and tabs.",
+                Build = () => BuildSample(WorkshopSample.Build)
+            };
+
+            yield return new Scenario
+            {
+                Name = "sample-dashboard",
+                Description = "Sample window 5: nested split panels both ways, stats, a painted " +
+                              "map, a machine tree and tabs.",
+                Build = () => BuildSample(DashboardSample.Build)
             };
         }
 
@@ -1020,6 +1083,51 @@ namespace LayoutHarness
                     break;
                 }
             }
+
+            return root;
+        }
+
+        /// <summary>
+        /// A split panel with a button in each panel, so the picture shows the panels being
+        /// stretched across and the bars between them.
+        /// </summary>
+        private static RectangleControl BuildSplitPanel(Orientation orientation)
+        {
+            RectangleControl root = CreateRoot();
+
+            var split = new SplitPanelControl(panelCount: 3, orientation, _Name: "split")
+            {
+                Size = new PointD(360, 160),
+                IsAutoSize = false
+            };
+
+            for (int i = 0; i < split.PanelCount; i++)
+            {
+                var button = new ButtonControl(_Name: "panelButton" + i);
+                button.Text = "Panel " + (i + 1);
+                split.Panels[i].Children.Add(button);
+            }
+
+            split.SetFractions(0.25, 0.5, 0.25);
+
+            root.Children.Add(split);
+            return root;
+        }
+
+        /// <summary>
+        /// One of the example windows, built by the mod's own code into the stand-in root - the
+        /// same tree the hotkey opens, minus the title bar and the client.
+        /// </summary>
+        private static RectangleControl BuildSample(Action<UIControl, ICoreClientAPI?> build)
+        {
+            var root = new RectangleControl(
+                backgroundColor: new ElementColor(0.20, 0.16, 0.13, 1.0),
+                _Name: "root");
+
+            root.InsideOrientation = Orientation.Top;
+            root.Padding = 10;
+
+            build(root, null);
 
             return root;
         }

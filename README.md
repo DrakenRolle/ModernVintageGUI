@@ -84,12 +84,22 @@ opens and takes the picture, so it cannot show a screen that no longer exists.*
   `IsEnabled` redraws. Which properties do that is a list rather than "everything that notifies",
   because the arrange pass writes `Position` and a rule that invalidated on any change would make
   the layout re-enter itself forever - the harness checks that a layout pass writes none of them
+* **Split panels.** A box cut into any number of panels with a grab bar between each pair; the
+  player drags a bar to resize its two neighbours. `InsideOrientation` decides whether the bars run
+  vertically (panels side by side) or horizontally (panels stacked), and the shares are kept as
+  fractions so they survive the GUI scale slider
+* **A short syntax.** `UI.Column(UI.Heading("Save"), UI.Row(UI.Button("Yes", Save), UI.Button("No")))`
+  builds the tree it reads like, and every control takes `.WithSize(w, h)`, `.WithName(n)`,
+  `.Aligned(...)` and friends. Optional - the constructors and object initializers still work
+* **Five sample windows** of rising complexity, from a confirm box to a dashboard of nested split
+  panels, on the K hotkey - test UIs for the framework and worked examples for a mod
 
 **Controls so far:** `RectangleControl`, `TextLabelControl`, `ButtonControl`, `ContextMenuControl`,
 `TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`, `DropdownControl`,
 `ItemTypeSelectorControl`, `CheckboxControl`, `TextInputControl`, `ProgressBarControl`,
 `TabsControl`, `ImageControl`, `ColorPickerControl`, `PixelCanvasControl`, `ListViewControl`,
-`ItemListViewControl`, `DetailViewControl`, `TreeViewControl`, and `ShapeViewerControl`.
+`ItemListViewControl`, `DetailViewControl`, `TreeViewControl`, `ShapeViewerControl`, and
+`SplitPanelControl`.
 
 <h2>What is still ongoing</h2>
 
@@ -204,6 +214,34 @@ and so does anything in an overlay container, which stacks in no direction at al
 > Note for `TextLabelControl`: where the *text* sits inside the label is `TextAlign`. It used to be
 > called `Orientation` too, which hid the one above and made a label the one control that could not
 > be aligned in its container.
+
+<h2>The short way</h2>
+
+Everything above can also be written as the tree it is. `UI` builds controls with the dialog's font
+and colour already set, and the fluent helpers hand the control back so a line can configure it and
+add it at once:
+
+```csharp
+dialog.Add(UI.Column(
+    UI.Title("Discard the changes?"),
+    UI.Paragraph("The recipe was edited and not saved. Closing now throws the edits away.", 320),
+    UI.Row(
+            UI.Button("Keep editing", () => dialog.Hide()),
+            UI.Button("Discard", Discard, GuiIcons.Eraser))
+        .Aligned(Orientation.Right)));
+
+var save = column.Add(UI.Button("Save", Save).WithSize(160, 40));   // Add returns the child
+```
+
+`UI.Column`, `UI.Row`, `UI.Overlay`, `UI.Panel`, `UI.Group`, `UI.Scroll`, `UI.Split` and `UI.Tabs`
+are the containers; `UI.Label`, `UI.Heading`, `UI.Title`, `UI.Paragraph`, `UI.Button`, `UI.Checkbox`,
+`UI.TextBox`, `UI.Dropdown`, `UI.Progress`, `UI.Icon` and `UI.Spacer` the controls. On any control:
+`.WithSize(w, h)` (a fixed size, which is `Size` plus `IsAutoSize = false`), `.WithName`, `.WithMargin`,
+`.WithPadding`, `.WithMaxSize`, `.Aligned`, `.Enabled`, `.Visible`, `.Clipping` and `.OnClick`. All of
+it is optional and returns the concrete control, so anything the helper does not cover is set right
+after. The sample windows under `Samples/` are written this way throughout;
+[docs/syntax-review.md](docs/syntax-review.md) has the reasoning and the things that were left as they
+are.
 
 <h2>Keyboard</h2>
 
@@ -435,6 +473,42 @@ focus movement - which in a tree is exactly the visible rows in exactly the righ
 All three scroll the way every container here does, by implementing `IScrollable`: a wheel tick,
 a drag on the vanilla scrollbar, and clipping at the viewport edge.
 
+<h2>Split panels</h2>
+
+`SplitPanelControl` cuts a box into panels with a grab bar between each pair. The player drags a bar
+to give one panel room at the cost of its neighbour; the other panels stay where they are.
+
+```csharp
+var split = new SplitPanelControl(panelCount: 3, Orientation.Left)   // side by side, vertical bars
+{
+    Size = new PointD(420, 240)
+};
+
+split.Panels[0].Children.Add(tree);
+split.Panels[1].Children.Add(list);
+split.Panels[2].Children.Add(details);
+split.SetFractions(0.25, 0.45, 0.30);        // shares of the width; 1, 2, 1 works too
+
+split.SplitterMoved += (s, e) => capi.ShowChatMessage("bar " + e.SplitterIndex + " moved");
+```
+
+Or, with the short syntax, one panel per argument: `UI.Split(Orientation.Top, upper, lower)`.
+
+`InsideOrientation` decides where the bars sit, the same way it decides the stacking direction of
+any container - because that is what it is here too: `Left` or `Right` puts the panels side by side
+with vertical bars, `Top` or `Bottom` stacks them with horizontal bars. Give the split panel a size:
+its panels are shares of a whole, and a whole that grew to fit its content would leave nothing to
+share out. The shares are fractions rather than pixels, so they survive the GUI scale slider.
+
+The panels are ordinary `RectangleControl`s that clip, so content larger than its panel is cut at
+the bar rather than squashed. A hidden panel (`split.Panels[1].IsVisible = false`) takes its bar with
+it and hands its room to the others; showing it again gives it back. `MinPanelSize` (24 by default)
+is how small a drag can make a panel, `SplitterThickness` how wide the bar is, `IsResizable = false`
+locks the bars, and `AddPanel()` / `RemovePanel(i)` change the count at runtime. From the keyboard a
+focused bar moves with the arrow keys along its axis; `MoveSplitter(i, pixels)` and
+`SetSplitterPosition(i, 0.3)` do the same from code. Split panels nest: the explorer and the
+dashboard samples put a three way split inside a stacked one.
+
 <h2>Anything in 3D</h2>
 
 `ShapeViewerControl` shows a block, an item, a multiblock structure, an entity or any shape as a
@@ -589,6 +663,25 @@ One design, any scale - author units in, device pixels out:
 
 <img src="docs/images/readme-scales.png" alt="The same UI rendered at GUI scale 1.0, 1.5 and 2.0" />
 
+<h2>Sample windows</h2>
+
+Besides the showcase, which has one of everything, there are five example windows that are each a
+*kind* of screen a mod might want - test UIs for the framework and worked examples for a mod. **K**
+opens a gallery with a button per sample; `.mvsui sample <id>` opens one directly, `.mvsui sample`
+lists them. Each opens as its own dialog, so several can be compared side by side.
+
+| | Sample | What it exercises |
+| --- | --- | --- |
+| 1 | `confirm` | A question and two buttons. One expression. |
+| 2 | `settings` | A form: groups of checkboxes, a dropdown, a text field, a value with buttons either side, and Save that greys out until something changed. |
+| 3 | `explorer` | Tree, list and detail view in a three way split panel, over a log in a stacked split. Drag any bar. |
+| 4 | `workshop` | A crafting station: slots, a recipe picker with a turning 3D preview, a progress bar with buttons, tabs for the recipe book and a log. |
+| 5 | `dashboard` | Nested split panels both ways, live stat bars, a map to paint on, a machine tree, tabs - and switches that hide a panel, freeze the upper half and lock the bars while the screen is open. |
+
+They live in `ModernVintageGUI/Samples/` and are built by `SampleGallery`. Every one of them is also
+a scenario in the layout harness, so a change to a control is checked against five real screens and
+not only against the showcase.
+
 <h1>Layout harness</h1>
 
 `ZLayoutHarness` runs the real layout code without the game, renders each scenario to PNG and checks
@@ -605,8 +698,9 @@ reused across a scale change matches a freshly built one. Add a scenario in `Sce
 you add a control.
 
 On top of the per scenario invariants it checks the rules that are not about one tree: the tab
-order, clipping, scrolling, size caps, the pixel canvas, the four cross axis alignments on both
-axes and at two GUI scales, that hiding collapses while disabling does not and that neither can be
+order, clipping, scrolling, size caps, the split panel arithmetic (shares, drag, minimum size,
+hidden panels, scale), the pixel canvas, the four cross axis alignments on both axes and at two GUI
+scales, that hiding collapses while disabling does not and that neither can be
 reached by Tab or by the mouse, and that a layout pass writes no property that would ask for another
 layout pass.
 

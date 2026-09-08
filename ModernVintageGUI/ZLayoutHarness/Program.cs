@@ -96,6 +96,7 @@ namespace LayoutHarness
             CheckClipping(failures);
             CheckScrolling(failures);
             CheckMaxSize(failures);
+            CheckSplitPanel(failures);
             CheckPixelCanvasPainting(failures);
             CheckPixelCanvasAreas(failures);
 
@@ -1409,6 +1410,135 @@ namespace LayoutHarness
         ///
         /// And it scales, like every other authored dimension.
         /// </summary>
+        /// <summary>
+        /// The arithmetic of a split panel, both ways round: panels and bars fill the box to the
+        /// pixel, shares are honoured, a bar moves only its two neighbours, the minimum size
+        /// stops a drag, a hidden panel hands its room to the others, and all of it scales.
+        /// </summary>
+        private static void CheckSplitPanel(List<string> failures)
+        {
+            Console.WriteLine("### split panel");
+            Console.WriteLine("Panels and bars fill the box, shares hold, a bar moves its neighbours only, the minimum holds.");
+            Console.WriteLine();
+
+            const double Width = 300;
+            const double Height = 120;
+            const double Thickness = 6;
+
+            SplitPanelControl Build(Orientation orientation, double scale)
+            {
+                var root = new RectangleControl(_Name: "root");
+                root.InsideOrientation = Orientation.Top;
+                root.Padding = 0;
+                root.LayoutScale = scale;
+
+                var split = new SplitPanelControl(panelCount: 3, orientation, _Name: "split", _Margin: 0)
+                {
+                    SplitterThickness = Thickness,
+                    Size = new PointD(Width, Height),
+                    IsAutoSize = false
+                };
+
+                root.Children.Add(split);
+                root.PerformLayout();
+                return split;
+            }
+
+            double Along(UIControl control, bool stacked) => stacked ? control.Size.Y : control.Size.X;
+
+            void Relayout(SplitPanelControl split) => split.Parent!.PerformLayout();
+
+            void Expect(string what, double actual, double expected)
+            {
+                if (Math.Abs(actual - expected) > 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "[split panel] {0}: got {1:0.##}, expected {2:0.##}", what, actual, expected));
+                }
+            }
+
+            foreach (bool stacked in new[] { false, true })
+            {
+                string axis = stacked ? "stacked" : "side by side";
+                Orientation orientation = stacked ? Orientation.Top : Orientation.Left;
+                double box = stacked ? Height : Width;
+                double available = box - 2 * Thickness;
+
+                SplitPanelControl split = Build(orientation, 1.0);
+
+                // 1. Everything visible adds up to the box.
+                double total = 0;
+                foreach (UIControl child in split.Children)
+                    total += Along(child, stacked);
+
+                Expect(axis + " - panels and bars together", total, box);
+
+                // 2. Equal shares to begin with.
+                for (int i = 0; i < split.PanelCount; i++)
+                    Expect(axis + " - equal share of panel " + i, Along(split.Panels[i], stacked), available / 3);
+
+                // 3. Shares as asked for.
+                split.SetFractions(0.5, 0.25, 0.25);
+                Relayout(split);
+
+                Expect(axis + " - half share", Along(split.Panels[0], stacked), available * 0.5);
+                Expect(axis + " - quarter share", Along(split.Panels[1], stacked), available * 0.25);
+
+                // 4. Moving the first bar moves its two neighbours and nothing else.
+                double untouched = Along(split.Panels[2], stacked);
+                split.MoveSplitter(0, 30);
+                Relayout(split);
+
+                Expect(axis + " - moved bar grew the left panel", Along(split.Panels[0], stacked), available * 0.5 + 30);
+                Expect(axis + " - moved bar shrank the right panel", Along(split.Panels[1], stacked), available * 0.25 - 30);
+                Expect(axis + " - moved bar left the third panel alone", Along(split.Panels[2], stacked), untouched);
+
+                // 5. A drag past the end stops at the minimum size.
+                split.MoveSplitter(0, 10000);
+                Relayout(split);
+
+                Expect(axis + " - minimum size holds", Along(split.Panels[1], stacked), SplitPanelControl.UnscaledDefaultMinPanelSize);
+
+                // 6. A hidden panel takes its bar with it and hands its room to the others.
+                split.Panels[1].IsVisible = false;
+                Relayout(split);
+
+                double visibleTotal = 0;
+                int visibleBars = 0;
+
+                foreach (UIControl child in split.Children)
+                {
+                    if (!child.IsVisible)
+                        continue;
+
+                    visibleTotal += Along(child, stacked);
+
+                    if (!(child is RectangleControl))
+                        visibleBars++;
+                }
+
+                Expect(axis + " - visible panels and bars with one panel hidden", visibleTotal, box);
+                Expect(axis + " - bars with one panel hidden", visibleBars, 1);
+
+                // 7. And it comes back.
+                split.Panels[1].IsVisible = true;
+                Relayout(split);
+
+                Expect(axis + " - minimum size still holds after showing again", Along(split.Panels[1], stacked), SplitPanelControl.UnscaledDefaultMinPanelSize);
+
+                // 8. At twice the scale everything is twice as big, shares included.
+                SplitPanelControl scaled = Build(orientation, 2.0);
+                scaled.SetFractions(0.5, 0.25, 0.25);
+                Relayout(scaled);
+
+                Expect(axis + " - scaled bar", Along(scaled.Children[1], stacked), Thickness * 2);
+                Expect(axis + " - scaled half share", Along(scaled.Panels[0], stacked), (box - 2 * Thickness) * 2 * 0.5);
+            }
+
+            Console.WriteLine("  panels, bars, shares, drag, minimum, hiding and scale all hold");
+            Console.WriteLine();
+        }
+
         private static void CheckMaxSize(List<string> failures)
         {
             Console.WriteLine("### max size");
