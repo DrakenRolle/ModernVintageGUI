@@ -889,7 +889,7 @@ namespace IS2Mod.ControlTypes
         }
 
         /// <summary>Turns a dialog local rectangle into the scissor box and switches it on.</summary>
-        private void ApplyScissor(ICoreClientAPI api, LayoutRect clip)
+        protected void ApplyScissor(ICoreClientAPI api, LayoutRect clip)
         {
             PointD dialogPosition = Dialog?.Position ?? new PointD(0, 0);
 
@@ -914,7 +914,7 @@ namespace IS2Mod.ControlTypes
         /// return to is the clip of the nearest clipping ancestor, which
         /// <see cref="EffectiveClip"/> already knows how to work out.
         /// </summary>
-        private void RestoreAncestorScissor(ICoreClientAPI api)
+        protected void RestoreAncestorScissor(ICoreClientAPI api)
         {
             for (UIControl? ancestor = Parent; ancestor != null; ancestor = ancestor.Parent)
             {

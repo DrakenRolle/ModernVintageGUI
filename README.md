@@ -88,7 +88,7 @@ in game, so it cannot show a screen that no longer exists.*
 `TitleBarControl`, `ItemSlotControl`, `InventoryGridControl`, `DropdownControl`,
 `ItemTypeSelectorControl`, `CheckboxControl`, `TextInputControl`, `ProgressBarControl`,
 `TabsControl`, `ImageControl`, `ColorPickerControl`, `PixelCanvasControl`, `ListViewControl`,
-`ItemListViewControl`, `DetailViewControl`, `TreeViewControl`.
+`ItemListViewControl`, `DetailViewControl`, `TreeViewControl`, and `ShapeViewerControl`.
 
 <h2>What is still ongoing</h2>
 
@@ -432,6 +432,84 @@ focus movement - which in a tree is exactly the visible rows in exactly the righ
 All three scroll the way every container here does, by implementing `IScrollable`: a wheel tick,
 a drag on the vanilla scrollbar, and clipping at the viewport edge.
 
+<h2>Anything in 3D</h2>
+
+`ShapeViewerControl` shows a block, an item, a multiblock structure, an entity or any shape as a
+model you can turn with the right mouse button and zoom with the wheel — the viewer the character
+creator has, as a control:
+
+```csharp
+var viewer = new ShapeViewerControl { Size = new PointD(150, 150), IsAutoSize = false };
+
+viewer.ShowBlock(capi.World.GetBlock(new AssetLocation("game:crate-normal-oak")));
+viewer.ShowItem(item);                                   // a flat icon becomes the game's voxel slab
+viewer.ShowStack(stack);                                 // whatever a stack holds
+
+viewer.ShowBlocks(new[] {                                // a multiblock: blocks at offsets
+    (new Vec3i(0, 0, 0), casing), (new Vec3i(1, 0, 0), casing),
+    (new Vec3i(0, 0, 1), casing), (new Vec3i(1, 0, 1), casing) });
+viewer.ShowBlocks(memberPositions, capi.World.BlockAccessor);   // the blocks standing at positions
+viewer.ShowSchematic(schematic, capi.World);            // or a schematic
+
+viewer.ShowEntity(capi.World.GetEntityType(new AssetLocation("game:wolf-male")));  // a type, as a still
+viewer.ShowEntity(capi.World.Player.Entity);            // a live entity: animated, dressed
+
+viewer.ShowShape(shape, capi.Tesselator.GetTextureSource(block));   // any shape, any textures
+viewer.ShowShape(new AssetLocation("game:block/wood/crate"), textures);
+viewer.ShowMesh(meshData);                               // or a mesh you built yourself
+viewer.ResetView();                                      // back to the starting angle and zoom
+```
+
+Right drag turns it, the wheel zooms, and with the viewer focused the arrow keys turn it too. Pitch
+stops at the poles so the model cannot be rolled upside down, yaw goes round and round. A zoomed in
+model is clipped at the frame.
+
+Whatever is shown is fitted by its bounding sphere, so a pebble, a pulverizer and a three block
+tall creature come out the same apparent size, and a bigger frame simply shows a bigger model. A
+block whose shape is larger than its cube — most multiblock controllers — is fitted whole.
+
+Turning and zooming cost **no redraw**. They change three floats that the per frame pass reads, so a
+drag does not rebuild the dialog surface — which is the most expensive thing this framework does.
+
+The mesh is built once, on the first frame that has a client API to build it with, and released when
+the dialog is disposed. Building a tree before there is a dialog therefore works, and so does the
+layout harness, which has no API at all and lays the viewer out like any other control. A live
+entity is the one thing that is not a mesh: it goes through the game's own entity renderer every
+frame, exactly as the character creator draws the player.
+
+```csharp
+viewer.ModelFill = 0.9;                            // how much of the frame the model fills at zoom 1
+viewer.UnscaledModelSize = 72;                     // or a fixed size, in author units
+viewer.DefaultYaw = 45; viewer.DefaultPitch = 22.5; // where ResetView puts it
+viewer.RotateButton = EnumMouseButton.Right;       // the default
+viewer.WheelZooms = false;                         // let a scrolling list have the wheel instead
+viewer.LiveEntityRendering = false;                // draw entities as stills too
+viewer.DrawsFrame = false;                         // no recessed panel of its own
+```
+
+<h3>How it draws, and what is still to be looked at</h3>
+
+The model is drawn with the game's own `gui` shader, the one already bound when the interactive pass
+runs and the one `RenderItemstackToGui` draws a block in a slot with. The stage arrives with the depth
+test, the depth mask and back face culling on, which is exactly what a turning model needs, so no GL
+state is touched at all. An earlier version swapped in the world shader and toggled the depth state
+around its draw; both of those were where its bugs came from — a white sky over a grass field, from a
+depth mask switched off for the whole engine.
+
+Two things fall out of the way the stage works and are worth knowing before touching the render pass:
+
+* **A half turn, not a mirror.** The model's Y axis points up and the GUI's points down. They are
+  reconciled with a 180° turn about X rather than a Y mirror, because culling is on and a mirror
+  reverses the winding of every face — the model would be drawn inside out.
+* **Depth is squashed to a band.** The ortho stage tests depth and a larger z is nearer. A model has
+  depth of its own, so it is placed a little in front of the dialog surface and squashed along z
+  whenever it would reach outside `ModelDepthBand`. The projection is orthographic, so the eye sees
+  nothing of that — and a large, zoomed in model stays behind the stack on the cursor.
+
+What has not yet happened is a look at it in a running client: the render pass is written against
+the decompiled engine code, and the two places to check first are that the model lands at the right
+depth and size, and that a live entity stands centred in its frame.
+
 <h2>Icons</h2>
 
 Any control that takes an `IconName` takes the game's icons and yours alike. Register an SVG once
@@ -536,6 +614,15 @@ dotnet run --project ModernVintageGUI/ZLayoutHarness -- --docs docs/images
 
 What the harness cannot cover is anything that only exists at runtime in the game: the Harmony
 patches, the real mouse grab, focus and depth against vanilla dialogs, and GPU uploads.
+
+For those there is the in-game pipeline in `ZIngameShots`: it builds the mod, starts the game on
+the world in the Saves folder, opens the showcase, pulls a dropdown and a menu open, photographs the
+whole window each time and closes the game again - no hands. [ZIngameShots/README.md](ModernVintageGUI/ZIngameShots/README.md)
+has the step script format.
+
+```
+ModernVintageGUI/ZIngameShots/ingame-screenshot.ps1
+```
 
 <h2>Profiling</h2>
 

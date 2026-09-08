@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "UIDesigner",
+      "name": "RecipeDesigner",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "ModernVintageGUI/ZUIDesigner/UIDesigner.csproj", "--urls", "http://localhost:5199"],
+      "runtimeArgs": ["run", "--project", "ModernVintageGUI/ZRecipeDesigner/RecipeDesigner.csproj", "--urls", "http://localhost:5199"],
       "port": 5199
     }
   ]

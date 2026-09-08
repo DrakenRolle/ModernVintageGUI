@@ -29,6 +29,15 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "shape-viewer",
+                Description = "The 3D shape viewer's frame, at three sizes. Only the Cairo half "
+                            + "is here - the model is a GPU pass and there is no GPU, which is "
+                            + "exactly the boundary this scenario is meant to make visible.",
+                Build = BuildShapeViewer
+            };
+
+            yield return new Scenario
+            {
                 Name = "cross-axis-alignment",
                 Description = "A control's own Orientation across its parent's stacking "
                             + "direction: a column where four controls fill, sit left, centre "
@@ -310,6 +319,47 @@ namespace LayoutHarness
             row.Children.Add(rowButton4);
 
             root.Children.Add(row);
+
+            return root;
+        }
+
+        /// <summary>
+        /// The shape viewer's frame at three sizes.
+        ///
+        /// Without a client API the viewer has no model and no way to build one, so what this
+        /// renders is the recessed panel and nothing else. That is not a shortcoming of the
+        /// scenario, it is the shape of the control: half of it is ordinary framework code that
+        /// can be checked here, and half of it is a GPU pass that can only be checked in the
+        /// game. Having the first half under test is what makes the second half a small thing to
+        /// go wrong rather than a large one.
+        /// </summary>
+        private static RectangleControl BuildShapeViewer()
+        {
+            RectangleControl root = CreateRoot();
+
+            var row = new RectangleControl(_Name: "viewers");
+            row.InsideOrientation = Orientation.Left;
+
+            foreach (double size in new[] { 64.0, 100.0, 150.0 })
+            {
+                row.Children.Add(new ShapeViewerControl(_Name: "viewer" + (int)size)
+                {
+                    Size = new PointD(size, size),
+                    IsAutoSize = false
+                });
+            }
+
+            root.Children.Add(row);
+
+            // Not stretched: the viewer is a window onto something and a stretched window is a
+            // distorted one, so the caller sizes it. Center proves the alignment work applies to
+            // it like to anything else.
+            root.Children.Add(new ShapeViewerControl(_Name: "viewerCentred")
+            {
+                Size = new PointD(90, 90),
+                IsAutoSize = false,
+                Orientation = Orientation.Center
+            });
 
             return root;
         }

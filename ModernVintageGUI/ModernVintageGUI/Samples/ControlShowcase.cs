@@ -9,7 +9,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Config;
+using Vintagestory.API.MathTools;
 
 namespace ModernVintageGUI.Samples
 {
@@ -479,6 +481,9 @@ namespace ModernVintageGUI.Samples
             column.Children.Add(Heading("Enabled and visible"));
             column.Children.Add(BuildEnabledAndVisible());
 
+            column.Children.Add(Heading("3D shape viewer"));
+            column.Children.Add(BuildShapeViewer(capi));
+
             column.Children.Add(Heading("Context menu"));
 
             var opener = new ButtonControl(_Name: "menuButton");
@@ -547,6 +552,223 @@ namespace ModernVintageGUI.Samples
             group.Children.Add(toggles);
 
             return group;
+        }
+
+        /// <summary>How many of each kind the shape viewer's picker offers.</summary>
+        private const int ShapeViewerChoicesPerKind = 8;
+
+        /// <summary>
+        /// The 3D viewer, with a dropdown to put something in it.
+        ///
+        /// The picker is the point as much as the viewer is: one model proves the mesh path
+        /// works for one model, and a list across every kind of input proves it survives
+        /// whatever the game happens to have loaded - multi texture blocks, flat item icons,
+        /// creatures out of the entity atlas, a structure of several blocks, and the player
+        /// drawn live by the game's own renderer.
+        /// </summary>
+        private static UIControl BuildShapeViewer(ICoreClientAPI? capi)
+        {
+            var group = new RectangleControl(_Name: "shapeViewerGroup")
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            var viewer = new ShapeViewerControl(_Name: "shapeViewer")
+            {
+                Size = new PointD(150, 150),
+                IsAutoSize = false
+            };
+
+            group.Children.Add(viewer);
+
+            var picker = new DropdownControl(_Name: "shapeViewerPicker")
+            {
+                PlaceholderText = "Pick something",
+                MaxVisibleItems = 10
+            };
+
+            if (capi != null)
+            {
+                var items = new List<DropdownItem>
+                {
+                    // The two entries that are not one collectible: the player, drawn live the
+                    // way the character creator draws it, and a structure of several blocks.
+                    new DropdownItem("You, drawn live", value: "player"),
+                    new DropdownItem("A 2x2 multiblock", value: "multiblock")
+                };
+
+                // One per kind, so the list is eight different things rather than eight
+                // colours of the same plank.
+                var seen = new HashSet<string>();
+                int count = 0;
+
+                foreach (Block block in capi.World.Blocks)
+                {
+                    if (count >= ShapeViewerChoicesPerKind)
+                        break;
+
+                    if (block?.Code == null || block.Code.Path.Length == 0 || block.BlockId == 0)
+                        continue;
+
+                    if (!seen.Add("block " + KindOf(block.Code)))
+                        continue;
+
+                    items.Add(new DropdownItem(new ItemStack(block), value: "block:" + block.Code));
+                    count++;
+                }
+
+                count = 0;
+
+                foreach (Item item in capi.World.Items)
+                {
+                    if (count >= ShapeViewerChoicesPerKind)
+                        break;
+
+                    if (item?.Code == null || item.Code.Path.Length == 0 || item.Id == 0)
+                        continue;
+
+                    if (!seen.Add("item " + KindOf(item.Code)))
+                        continue;
+
+                    items.Add(new DropdownItem(new ItemStack(item), value: "item:" + item.Code));
+                    count++;
+                }
+
+                count = 0;
+
+                foreach (EntityProperties type in capi.World.EntityTypes)
+                {
+                    if (count >= ShapeViewerChoicesPerKind)
+                        break;
+
+                    // Only types with a shape of their own; an item on the ground or a
+                    // projectile borrows its look from elsewhere and would show nothing.
+                    if (type?.Code == null || type.Client?.Shape?.Base == null)
+                        continue;
+
+                    if (!seen.Add("entity " + KindOf(type.Code)))
+                        continue;
+
+                    items.Add(new DropdownItem(type.Code.ToShortString(), value: "entity:" + type.Code));
+                    count++;
+                }
+
+                picker.SetItems(items);
+
+                picker.SelectionChanged += (sender, e) =>
+                {
+                    ShowShapeViewerChoice(capi, viewer, e.Value?.ToString());
+                    viewer.ResetView();
+                };
+
+                // Something in it from the start - the first block: an empty frame says nothing
+                // about whether the mesh path works, and "it showed nothing" is the failure
+                // this is here to catch.
+                ShowShapeViewerChoice(capi, viewer, items.Count > 2 ? items[2].Value?.ToString() : null);
+            }
+
+            group.Children.Add(picker);
+
+            var hint = new TextLabelControl(
+                "Right drag turns, wheel zooms, arrows too",
+                _Name: "shapeViewerHint")
+            {
+                FontSize = 14
+            };
+
+            group.Children.Add(hint);
+
+            var reset = new ButtonControl(_Name: "shapeViewerReset") { Text = "Reset view" };
+            reset.Clicked += (sender, e) => viewer.ResetView();
+            group.Children.Add(reset);
+
+            return group;
+        }
+
+        /// <summary>The part of a code before its first dash: "planks" out of "planks-oak-ud".</summary>
+        private static string KindOf(AssetLocation code)
+        {
+            int dash = code.Path.IndexOf('-');
+            string kind = dash < 0 ? code.Path : code.Path.Substring(0, dash);
+
+            return code.Domain + ":" + kind;
+        }
+
+        /// <summary>
+        /// Puts the picker's choice into the viewer. A value is a kind and a code, "block:game:crate",
+        /// or one of the two special entries.
+        /// </summary>
+        private static void ShowShapeViewerChoice(ICoreClientAPI capi, ShapeViewerControl viewer, string? choice)
+        {
+            if (string.IsNullOrEmpty(choice))
+            {
+                viewer.Clear();
+                return;
+            }
+
+            if (choice == "player")
+            {
+                viewer.ShowEntity(capi.World.Player?.Entity);
+                return;
+            }
+
+            if (choice == "multiblock")
+            {
+                // Four planks in a square, the footprint a copper casing group has - the
+                // structure path with the least that can go wrong in the blocks themselves.
+                Block? unit = FirstBlockMatching(capi, "game:planks-*") ?? FirstBlockMatching(capi, "game:*");
+
+                if (unit == null)
+                {
+                    viewer.Clear();
+                    return;
+                }
+
+                viewer.ShowBlocks(new[]
+                {
+                    (new Vec3i(0, 0, 0), unit),
+                    (new Vec3i(1, 0, 0), unit),
+                    (new Vec3i(0, 0, 1), unit),
+                    (new Vec3i(1, 0, 1), unit)
+                });
+
+                return;
+            }
+
+            int colon = choice.IndexOf(':');
+            string kind = colon < 0 ? choice : choice.Substring(0, colon);
+            var code = new AssetLocation(colon < 0 ? "" : choice.Substring(colon + 1));
+
+            switch (kind)
+            {
+                case "block":
+                    viewer.ShowBlock(capi.World.GetBlock(code));
+                    break;
+
+                case "item":
+                    viewer.ShowItem(capi.World.GetItem(code));
+                    break;
+
+                case "entity":
+                    viewer.ShowEntity(capi.World.GetEntityType(code));
+                    break;
+
+                default:
+                    viewer.Clear();
+                    break;
+            }
+        }
+
+        /// <summary>The first block with a shape whose code matches the wildcard, or null.</summary>
+        private static Block? FirstBlockMatching(ICoreClientAPI capi, string wildcard)
+        {
+            foreach (Block block in capi.World.SearchBlocks(new AssetLocation(wildcard)))
+            {
+                if (block != null && block.BlockId != 0 && block.Shape?.Base != null)
+                    return block;
+            }
+
+            return null;
         }
 
         /// <summary>A plain list of captions, the everyday case.</summary>

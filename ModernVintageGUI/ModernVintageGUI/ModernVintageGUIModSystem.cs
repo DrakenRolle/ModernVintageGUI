@@ -2,9 +2,11 @@ using HarmonyLib;
 using IS2Mod.ControlTypes;
 using IS2Mod.ControlTypes.Custom;
 using IS2Mod.Input;
+using ModernVintageGUI.Automation;
 using ModernVintageGUI.ControlTypes;
 using ModernVintageGUI.Enums;
 using ModernVintageGUI.Inventory;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Vintagestory.API.Client;
@@ -37,6 +39,7 @@ namespace ModernVintageGUI
         private CustomDialogElement? dialog;
         private ModInventoryAccess? showcaseInventory;
         private ModInventorySystem? inventorySystem;
+        private AutoScreenshot? autoShot;
 
         // Called on server and client
         // Useful for registering block/entity classes on both sides
@@ -84,7 +87,11 @@ namespace ModernVintageGUI
             api.Input.RegisterHotKey(TestDialogHotkey, "Toggle ModernVintageGUI test dialog", GlKeys.J, HotkeyType.GUIOrOtherControls);
             api.Input.SetHotKeyHandler(TestDialogHotkey, OnDialogHotkey);
 
-            RegisterProfileCommand(api);
+            RegisterCommands(api);
+
+            // The screenshot pipeline: only when the environment asks for it, and then it waits
+            // for the world before it does anything. See ZIngameShots.
+            autoShot = AutoScreenshot.FromEnvironment(api, ShowShowcase);
         }
 
         /// <summary>
@@ -98,8 +105,12 @@ namespace ModernVintageGUI
         ///
         /// Move the cursor across the dialog while it runs - a hover is what triggers a redraw,
         /// and a report taken over a still cursor measures an idle dialog.
+        ///
+        /// <c>.mvsui autoshot &lt;script&gt; [output dir]</c> - runs a screenshot step script in
+        /// the open world, the same one the pipeline in ZIngameShots runs from outside, so a
+        /// script can be tried without restarting the game.
         /// </summary>
-        private void RegisterProfileCommand(ICoreClientAPI api)
+        private void RegisterCommands(ICoreClientAPI api)
         {
             api.ChatCommands
                 .Create("mvsui")
@@ -108,7 +119,53 @@ namespace ModernVintageGUI
                 .WithDescription("Time the open dialogs for the next few frames")
                 .WithArgs(api.ChatCommands.Parsers.OptionalInt("frames"))
                 .HandleWith(OnProfileCommand)
+                .EndSubCommand()
+                .BeginSubCommand("autoshot")
+                .WithDescription("Run a screenshot step script in this world")
+                .WithArgs(api.ChatCommands.Parsers.Word("script"), api.ChatCommands.Parsers.OptionalWord("output"))
+                .HandleWith(OnAutoshotCommand)
                 .EndSubCommand();
+        }
+
+        private TextCommandResult OnAutoshotCommand(TextCommandCallingArgs args)
+        {
+            ICoreClientAPI? capi = clientApi;
+
+            if (capi == null)
+                return TextCommandResult.Error("No client.");
+
+            string script = (string)args.Parsers[0].GetValue();
+            string? output = args.Parsers[1].IsMissing ? null : (string?)args.Parsers[1].GetValue();
+
+            try
+            {
+                // One run at a time; a run that was left open by a script without quit ends here.
+                autoShot?.Dispose();
+                autoShot = AutoScreenshot.Start(capi, ShowShowcase, script, output, worldReady: true);
+            }
+            catch (Exception e)
+            {
+                return TextCommandResult.Error(e.Message);
+            }
+
+            return TextCommandResult.Success("Running " + script);
+        }
+
+        /// <summary>
+        /// Opens the showcase - what the hotkey does, minus the toggle - and hands it out so the
+        /// screenshot automation can find controls in it.
+        /// </summary>
+        internal CustomDialogElement ShowShowcase()
+        {
+            if (clientApi == null)
+                throw new InvalidOperationException("No client.");
+
+            dialog ??= BuildTestDialog(clientApi, showcaseInventory);
+
+            if (!dialog.IsVisible)
+                dialog.Show();
+
+            return dialog;
         }
 
         private TextCommandResult OnProfileCommand(TextCommandCallingArgs args)
@@ -269,6 +326,9 @@ namespace ModernVintageGUI
 
         public override void Dispose()
         {
+            autoShot?.Dispose();
+            autoShot = null;
+
             dialog?.Dispose();
             dialog = null;
 
