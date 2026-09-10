@@ -77,11 +77,11 @@ namespace ModernVintageGUI.Samples
             // The log first, because everything else writes into it.
             RectangleControl log = UI.Scroll(Width - 20, 70);
             log.Name = "log";
-            log.Padding = 4;
 
             void Log(string line)
             {
-                TextLabelControl entry = UI.Label(line, 14);
+                // Wrapped to the box, so a long line is read rather than cut at the bar.
+                TextLabelControl entry = UI.Paragraph(line, UI.ScrollContentWidth(Width - 20), 14);
                 entry.Name = "logLine" + log.Children.Count;
                 log.Children.Add(entry);
 

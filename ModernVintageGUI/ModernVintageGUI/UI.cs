@@ -102,17 +102,22 @@ namespace ModernVintageGUI
             return group;
         }
 
+        /// <summary>The room a <see cref="Scroll"/> box keeps between its frame and its content.</summary>
+        public const double ScrollPadding = 4;
+
         /// <summary>
         /// A fixed size window onto its children that scrolls vertically when they do not fit.
         /// For the other axis set <c>EnableHorizontalScrollbar</c> on the result and give it
-        /// <c>InsideOrientation = Orientation.Left</c>.
+        /// <c>InsideOrientation = Orientation.Left</c>. A line of text that may be longer than
+        /// the box is a <see cref="Paragraph"/> at <see cref="ScrollContentWidth"/>, so it
+        /// wraps instead of being cut at the bar.
         /// </summary>
         public static RectangleControl Scroll(double width, double height, params UIControl[] children)
         {
             var box = new RectangleControl(
                 borderWidth: 2,
                 borderColor: new ElementColor(0.0, 0.0, 0.0, 0.4),
-                _Padding: 4)
+                _Padding: ScrollPadding)
             {
                 InsideOrientation = Orientation.Top
             };
@@ -123,6 +128,16 @@ namespace ModernVintageGUI
 
             box.AddRange(children);
             return box;
+        }
+
+        /// <summary>
+        /// The width a <see cref="Label"/> or <see cref="Paragraph"/> can have inside a
+        /// <see cref="Scroll"/> box of <paramref name="width"/> without being cut: the box less
+        /// its padding, the vertical bar, and the label's own margin.
+        /// </summary>
+        public static double ScrollContentWidth(double width)
+        {
+            return width - ScrollPadding * 2 - ScrollbarStyle.UnscaledWidth - 4;
         }
 
         /// <summary>

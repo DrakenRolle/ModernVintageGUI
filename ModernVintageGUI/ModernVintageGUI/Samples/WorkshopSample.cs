@@ -58,12 +58,15 @@ namespace ModernVintageGUI.Samples
             bool autoRepeat = false;
 
             // --- Log, first, because the rest writes into it.
-            RectangleControl log = UI.Scroll(220, 190);
+            const double LogWidth = 220;
+
+            RectangleControl log = UI.Scroll(LogWidth, 190);
             log.Name = "log";
 
             void Log(string line)
             {
-                TextLabelControl entry = UI.Label(line, 14);
+                // Wrapped to the box, so a long line is read rather than cut at the bar.
+                TextLabelControl entry = UI.Paragraph(line, UI.ScrollContentWidth(LogWidth), 14);
                 entry.Name = "logLine" + log.Children.Count;
                 log.Children.Add(entry);
                 log.ScrollTo(0, double.MaxValue);

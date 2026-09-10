@@ -260,8 +260,15 @@ namespace IS2Mod.ControlTypes
 
                 // Only the wrapping case looks at the box it is given, so only that case may be
                 // invalidated by it - otherwise every stretch of the label would re-measure it.
-                && (!WordWrap || _measuredWrapWidth == Size.X);
+                && (!WordWrap || _measuredWrapWidth == WrapWidth);
         }
+
+        /// <summary>
+        /// The width wrapped text is broken at. An auto sizing label that was given a width - a
+        /// paragraph - wraps at that width scaled, like every other authored dimension; any other
+        /// label wraps at whatever box the layout gave it.
+        /// </summary>
+        private double WrapWidth => IsAutoSize && ExplicitSize.X > 0 ? ScaledExplicitSize.X : Size.X;
 
         private void RememberMeasurement(PointD size)
         {
@@ -271,7 +278,7 @@ namespace IS2Mod.ControlTypes
             _measuredWeight = FontWeight;
             _measuredSlant = FontSlant;
             _measuredWordWrap = WordWrap;
-            _measuredWrapWidth = Size.X;
+            _measuredWrapWidth = WrapWidth;
             _measuredScale = LayoutScale;
             _measuredPadding = Padding;
             _measuredSize = size;
@@ -327,10 +334,12 @@ namespace IS2Mod.ControlTypes
                 return new PointD(ScaledPadding * 2, lineHeight + ScaledPadding * 2);
             }
 
-            if (WordWrap && Size.X > 0)
+            double wrapWidth = WrapWidth;
+
+            if (WordWrap && wrapWidth > 0)
             {
-                PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2), ScaledLineHeight);
-                return new PointD(Size.X, wrappedSize.Y + (ScaledPadding * 2));
+                PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, wrapWidth - (ScaledPadding * 2), ScaledLineHeight);
+                return new PointD(wrapWidth, wrappedSize.Y + (ScaledPadding * 2));
             }
 
             // XAdvance, not Width: Width is the inked bounding box and leaves out the side

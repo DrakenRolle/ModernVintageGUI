@@ -44,7 +44,8 @@ namespace ModernVintageGUI.Samples
 
             void Log(string line)
             {
-                TextLabelControl entry = UI.Label(line, 14);
+                // Wrapped to the box, so a long line is read rather than cut at the bar.
+                TextLabelControl entry = UI.Paragraph(line, UI.ScrollContentWidth(Width - 40), 14);
                 entry.Name = "logLine" + log.Children.Count;
                 log.Children.Add(entry);
                 log.ScrollTo(0, double.MaxValue);
@@ -53,7 +54,7 @@ namespace ModernVintageGUI.Samples
 
             void Alert(string line)
             {
-                TextLabelControl entry = UI.Label("! " + line, 14);
+                TextLabelControl entry = UI.Paragraph("! " + line, UI.ScrollContentWidth(Width - 40), 14);
                 entry.Name = "alertLine" + alerts.Children.Count;
                 alerts.Children.Add(entry);
                 alerts.ScrollTo(0, double.MaxValue);
