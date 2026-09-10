@@ -40,6 +40,39 @@ namespace IS2Mod.ControlTypes
         /// container. Two different questions, two different names.
         /// </summary>
         public TextOrientation TextAlign { get; set; }
+
+        /// <summary>The smallest font size <see cref="TextAutoSize"/> will shrink to, in author units.</summary>
+        public const double UnscaledMinFontSize = 6.0;
+
+        private bool _textAutoSize;
+
+        /// <summary>
+        /// Whether the text gives way when its box is too small for it. Off by default, and
+        /// then it is the other way round: a label with an explicit <see cref="UIControl.Size"/>
+        /// that is too small for its text is measured at the text's size instead, so the box -
+        /// and everything laid out around it - is never smaller than what it shows.
+        ///
+        /// On, the box stays what it was told and the text is drawn at the largest font size at
+        /// which it fits, never below <see cref="UnscaledMinFontSize"/>. A wrapped label shrinks
+        /// until its lines fit the height. Not to be confused with <see cref="UIControl.IsAutoSize"/>:
+        /// that lets the box follow the text, this lets the text follow the box.
+        /// </summary>
+        public bool TextAutoSize
+        {
+            get => _textAutoSize;
+            set
+            {
+                if (SetProperty(ref _textAutoSize, value))
+                    InvalidateLayout();
+            }
+        }
+
+        /// <summary>
+        /// The font size the text is actually drawn at, in author units. The same as
+        /// <see cref="FontSize"/> unless <see cref="TextAutoSize"/> shrank it. Read it after a
+        /// layout pass, because it depends on the box the label ended up with.
+        /// </summary>
+        public double EffectiveFontSize => LayoutScale > 0 ? FitFontSize(MeasureContext()) / LayoutScale : FontSize;
         public bool WordWrap { get; set; }
         public int LineHeight { get; set; }
         #endregion
@@ -118,7 +151,20 @@ namespace IS2Mod.ControlTypes
             // stretched to and never shrink back.
             if (!IsAutoSize && ExplicitSize.X > 0 && ExplicitSize.Y > 0)
             {
-                CalculatedSize = ScaledExplicitSize;
+                PointD box = ScaledExplicitSize;
+
+                // Off by default, the box is never smaller than its text: whatever it was told,
+                // it is at least what the text measures to. Measured at the box's own width
+                // first, which for wrapped text is the width the lines are broken at. With
+                // TextAutoSize on it is the text that gives way, when it is drawn.
+                if (!TextAutoSize)
+                {
+                    SetLayoutSize(box);
+                    PointD needed = MeasureText();
+                    box = new PointD(Math.Max(box.X, needed.X), Math.Max(box.Y, needed.Y));
+                }
+
+                CalculatedSize = box;
                 SetLayoutSize(CalculatedSize);
                 return CalculatedSize;
             }
@@ -283,7 +329,7 @@ namespace IS2Mod.ControlTypes
 
             if (WordWrap && Size.X > 0)
             {
-                PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2));
+                PointD wrappedSize = CalculateWrappedTextSize(ctx, Text, Size.X - (ScaledPadding * 2), ScaledLineHeight);
                 return new PointD(Size.X, wrappedSize.Y + (ScaledPadding * 2));
             }
 
@@ -297,7 +343,11 @@ namespace IS2Mod.ControlTypes
             );
         }
 
-        private PointD CalculateWrappedTextSize(Context ctx, string text, double maxWidth)
+        /// <summary>
+        /// The box the text takes when broken into lines no wider than <paramref name="maxWidth"/>,
+        /// at the font the context has selected and <paramref name="lineHeight"/> per line.
+        /// </summary>
+        private static PointD CalculateWrappedTextSize(Context ctx, string text, double maxWidth, double lineHeight)
         {
             string[] words = text.Split(' ');
             StringBuilder currentLine = new StringBuilder();
@@ -336,7 +386,113 @@ namespace IS2Mod.ControlTypes
                 lineCount++;
             }
 
-            return new PointD(maxLineWidth, lineCount * ScaledLineHeight);
+            return new PointD(maxLineWidth, lineCount * lineHeight);
+        }
+        #endregion
+
+        #region Fitting the text into the box
+        // What the fitted size was last worked out for. The box is part of the key here, unlike
+        // the measurement above: the answer is about this text in this box.
+        private bool _hasFit;
+        private string? _fitText;
+        private string? _fitFontName;
+        private FontWeight _fitWeight;
+        private FontSlant _fitSlant;
+        private bool _fitWordWrap;
+        private double _fitNominal;
+        private double _fitWidth;
+        private double _fitHeight;
+        private double _fitResult;
+
+        /// <summary>
+        /// The font size the text is drawn at, in device pixels: the nominal one, or with
+        /// <see cref="TextAutoSize"/> the largest size at which the text fits the box, never
+        /// below <see cref="UnscaledMinFontSize"/>. Leaves the context's font where it likes.
+        /// </summary>
+        private double FitFontSize(Context ctx)
+        {
+            double nominal = ScaledFontSize;
+
+            if (!TextAutoSize || nominal <= 0 || string.IsNullOrEmpty(Text))
+                return nominal;
+
+            double availableWidth = Size.X - ScaledPadding * 2;
+            double availableHeight = Size.Y - ScaledPadding * 2;
+
+            // No box yet - before the first layout - is not a box that is too small.
+            if (availableWidth <= 0 || availableHeight <= 0)
+                return nominal;
+
+            if (_hasFit
+                && _fitNominal == nominal
+                && _fitWidth == availableWidth
+                && _fitHeight == availableHeight
+                && _fitWordWrap == WordWrap
+                && _fitWeight == FontWeight
+                && _fitSlant == FontSlant
+                && string.Equals(_fitText, Text, StringComparison.Ordinal)
+                && string.Equals(_fitFontName, FontName, StringComparison.Ordinal))
+            {
+                return _fitResult;
+            }
+
+            double minimum = Math.Min(nominal, UnscaledMinFontSize * LayoutScale);
+            double size = nominal;
+
+            ctx.SelectFontFace(FontName, FontSlant, FontWeight);
+
+            if (!WordWrap)
+            {
+                // Glyph advances scale with the font size, so one ratio says how far down the
+                // text has to go on each axis; the smaller of the two wins.
+                ctx.SetFontSize(nominal);
+
+                TextExtents te = ctx.TextExtents(Text);
+                Cairo.FontExtents fe = ctx.FontExtents;
+                double width = te.XAdvance;
+                double height = fe.Ascent + fe.Descent;
+                double factor = 1.0;
+
+                if (width > availableWidth && width > 0)
+                    factor = Math.Min(factor, availableWidth / width);
+
+                if (height > availableHeight && height > 0)
+                    factor = Math.Min(factor, availableHeight / height);
+
+                if (factor < 1.0)
+                    size = Math.Max(minimum, Math.Floor(nominal * factor));
+            }
+            else
+            {
+                // Wrapped text has no single ratio - a smaller font also means fewer lines - so
+                // it steps down until the lines fit the height and the longest word the width.
+                double step = Math.Max(1.0, LayoutScale);
+
+                while (size > minimum)
+                {
+                    ctx.SetFontSize(size);
+
+                    PointD wrapped = CalculateWrappedTextSize(ctx, Text, availableWidth, ScaledLineHeight * size / nominal);
+
+                    if (wrapped.X <= availableWidth && wrapped.Y <= availableHeight)
+                        break;
+
+                    size = Math.Max(minimum, size - step);
+                }
+            }
+
+            _fitText = Text;
+            _fitFontName = FontName;
+            _fitWeight = FontWeight;
+            _fitSlant = FontSlant;
+            _fitWordWrap = WordWrap;
+            _fitNominal = nominal;
+            _fitWidth = availableWidth;
+            _fitHeight = availableHeight;
+            _fitResult = size;
+            _hasFit = true;
+
+            return size;
         }
         #endregion
 
@@ -346,7 +502,11 @@ namespace IS2Mod.ControlTypes
             if (string.IsNullOrEmpty(Text))
                 return;
 
-            SetupFont(ctx);
+            // The nominal size, or what TextAutoSize brought it down to for this box.
+            double fontSize = FitFontSize(ctx);
+
+            ctx.SelectFontFace(FontName, FontSlant, FontWeight);
+            ctx.SetFontSize(fontSize);
             ctx.SetSourceRGBA(
                 TextColor.RNormalized,
                 TextColor.GNormalized,
@@ -355,27 +515,31 @@ namespace IS2Mod.ControlTypes
 
             if (WordWrap)
             {
-                DrawWrappedText(ctx);
+                // The lines close up in step with the glyphs.
+                double lineHeight = ScaledFontSize > 0 ? ScaledLineHeight * fontSize / ScaledFontSize : ScaledLineHeight;
+
+                DrawWrappedText(ctx, lineHeight);
             }
             else
             {
-                DrawSingleLineText(ctx);
+                DrawSingleLineText(ctx, fontSize);
             }
 
             base.GenerateRenderData(surface, ctx);
         }
 
+        /// <summary>The font at its nominal size, for measuring.</summary>
         private void SetupFont(Context ctx)
         {
             ctx.SelectFontFace(FontName, FontSlant, FontWeight);
             ctx.SetFontSize(ScaledFontSize);
         }
 
-        private void DrawSingleLineText(Context ctx)
+        private void DrawSingleLineText(Context ctx, double fontSize)
         {
-            EnsureExtents(ctx);
+            EnsureExtents(ctx, fontSize);
 
-            (double x, double y) = GetTextPosition(_glyphExtents, _lineExtents, CapHeightCached(ctx));
+            (double x, double y) = GetTextPosition(_glyphExtents, _lineExtents, CapHeightCached(ctx, fontSize));
 
             ctx.MoveTo(x, y);
             ctx.ShowText(Text);
@@ -408,10 +572,10 @@ namespace IS2Mod.ControlTypes
         /// Cached per label rather than in a table keyed by the string, because a label that
         /// does change its text - a counter - would otherwise fill that table up forever.
         /// </summary>
-        private void EnsureExtents(Context ctx)
+        private void EnsureExtents(Context ctx, double fontSize)
         {
             if (_hasExtents
-                && _extentsFontSize == ScaledFontSize
+                && _extentsFontSize == fontSize
                 && _extentsWeight == FontWeight
                 && _extentsSlant == FontSlant
                 && string.Equals(_extentsText, Text, StringComparison.Ordinal)
@@ -432,7 +596,7 @@ namespace IS2Mod.ControlTypes
 
             _extentsText = Text;
             _extentsFontName = FontName;
-            _extentsFontSize = ScaledFontSize;
+            _extentsFontSize = fontSize;
             _extentsWeight = FontWeight;
             _extentsSlant = FontSlant;
             _hasExtents = true;
@@ -451,9 +615,9 @@ namespace IS2Mod.ControlTypes
         private static readonly System.Collections.Generic.Dictionary<(string, double, FontWeight, FontSlant), double>
             CapHeights = new System.Collections.Generic.Dictionary<(string, double, FontWeight, FontSlant), double>();
 
-        private double CapHeightCached(Context ctx)
+        private double CapHeightCached(Context ctx, double fontSize)
         {
-            var key = (FontName, ScaledFontSize, FontWeight, FontSlant);
+            var key = (FontName, fontSize, FontWeight, FontSlant);
 
             if (CapHeights.TryGetValue(key, out double cached))
                 return cached;
@@ -548,7 +712,7 @@ namespace IS2Mod.ControlTypes
             return (x, y);
         }
 
-        private void DrawWrappedText(Context ctx)
+        private void DrawWrappedText(Context ctx, double lineHeight)
         {
             string[] words = Text.Split(' ');
             StringBuilder currentLine = new StringBuilder();
@@ -572,7 +736,7 @@ namespace IS2Mod.ControlTypes
                     ctx.MoveTo(x, currentY);
                     ctx.ShowText(currentLine.ToString());
 
-                    currentY += ScaledLineHeight;
+                    currentY += lineHeight;
                     currentLine.Clear();
                     currentLine.Append(word);
 

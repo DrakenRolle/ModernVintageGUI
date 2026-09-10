@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
@@ -27,12 +28,16 @@ namespace ModernVintageGUI.Samples
             ButtonControl discard = UI.Button("Discard", () => capi?.ShowChatMessage("Confirm: discarded"), GuiIcons.Eraser);
             discard.Name = "discardButton";
 
+            TextLabelControl text = UI.Paragraph(
+                "The recipe was edited and not saved. Closing now throws the edits away; " +
+                "there is no undo for this.",
+                320);
+            text.Size = new PointD(320, 60);
+            text.IsAutoSize = false;
+
             parent.Add(UI.Column(
                 UI.Title("Discard the changes?"),
-                UI.Paragraph(
-                    "The recipe was edited and not saved. Closing now throws the edits away; " +
-                    "there is no undo for this.",
-                    320),
+                text,
                 UI.Spacer(1, 8),
                 UI.Row(keep, discard).Aligned(Orientation.Right)));
         }

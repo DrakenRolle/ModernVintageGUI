@@ -48,7 +48,9 @@ namespace ModernVintageGUI.ControlTypes
     /// </code>
     ///
     /// The panels are ordinary <see cref="RectangleControl"/>s that clip what is put in them, so
-    /// content larger than its panel is cut at the bar rather than squashed. Give the split panel
+    /// content larger than its panel is cut at the bar rather than squashed - and, with
+    /// <see cref="ScrollPanels"/> on (the default), the panel grows a scrollbar for what was cut,
+    /// only while one is needed. Give the split panel
     /// a size: its panels are shares of a whole, and a whole that grew to fit its content would
     /// leave nothing to share out. The shares are kept as fractions rather than pixels, which is
     /// what makes them survive a change of the GUI scale.
@@ -139,6 +141,32 @@ namespace ModernVintageGUI.ControlTypes
 
         /// <summary>Whether the player may drag the bars at all. On by default.</summary>
         public bool IsResizable { get; set; } = true;
+
+        private bool _scrollPanels = true;
+
+        /// <summary>
+        /// Whether a panel shows scrollbars when its content does not fit - on by default. The
+        /// bars appear only when they are needed, on the axis that overflows, and go away again
+        /// when the panel is dragged wide enough. Off, the content is simply cut at the panel's
+        /// edge. For one panel that should differ, set its own
+        /// <see cref="RectangleControl.EnableVerticalScrollbar"/> and
+        /// <see cref="RectangleControl.EnableHorizontalScrollbar"/> after this.
+        /// </summary>
+        public bool ScrollPanels
+        {
+            get => _scrollPanels;
+            set
+            {
+                if (!SetProperty(ref _scrollPanels, value))
+                    return;
+
+                foreach (RectangleControl panel in _panels)
+                {
+                    panel.EnableVerticalScrollbar = value;
+                    panel.EnableHorizontalScrollbar = value;
+                }
+            }
+        }
 
         /// <summary>Raised whenever a bar is moved, by drag, by keyboard or from code.</summary>
         public event EventHandler<SplitterMovedEventArgs>? SplitterMoved;
@@ -271,9 +299,14 @@ namespace ModernVintageGUI.ControlTypes
             {
                 InsideOrientation = Orientation.Top,
 
-                // Content larger than the panel is cut at the bar, not squashed - a list in a
-                // panel dragged narrow should lose its right edge and keep its rows readable.
-                ClipsChildren = true
+                // Content larger than the panel is never squashed: it is cut at the bar, and
+                // with ScrollPanels on (the default) the panel grows a scrollbar for it - so a
+                // list in a panel dragged narrow keeps its rows readable and can still be
+                // scrolled to the edge that went under the bar. A bar appears only when it is
+                // needed, and enabling one switches clipping on with it.
+                ClipsChildren = true,
+                EnableVerticalScrollbar = _scrollPanels,
+                EnableHorizontalScrollbar = _scrollPanels
             };
 
             _panels.Add(panel);

@@ -93,15 +93,19 @@ namespace ModernVintageGUI.Samples
             volumeLabel.Size = new PointD(70, 26);
             volumeLabel.IsAutoSize = false;
 
+            // Glyph buttons meant to stay small: the caption shrinks to the box rather than the
+            // box growing to the button font.
             ButtonControl volumeDown = UI.Button("-", () => SetVolume(settings.Volume - 0.1));
             volumeDown.Name = "volumeDown";
             volumeDown.Size = new PointD(32, 26);
             volumeDown.IsAutoSize = false;
+            volumeDown.TextAutoSize = true;
 
             ButtonControl volumeUp = UI.Button("+", () => SetVolume(settings.Volume + 0.1));
             volumeUp.Name = "volumeUp";
             volumeUp.Size = new PointD(32, 26);
             volumeUp.IsAutoSize = false;
+            volumeUp.TextAutoSize = true;
 
             // --- Game
             TextLabelControl difficultyLabel = UI.Label("Difficulty");

@@ -39,7 +39,13 @@ namespace ModernVintageGUI.Automation
     /// menu menuButton        # shows the context menu attached to that control; "menu menuButton close" hides it
     /// hover saveButton       # moves the cursor onto a control, for hover looks
     /// click saveButton       # presses and releases the left button in the middle of a control
+    /// drag _splitter0 80 0   # presses in the middle of a control, moves by 80,0 in 8 moves and releases; "drag NAME DX DY 20" moves in 20
+    /// key Left _splitter0    # focuses a control and presses a key (a GlKeys name); "key Escape" goes to the topmost dialog
+    /// type Dennis            # types the characters into the topmost dialog, for a focused text field
+    /// wheel stats -2         # moves the cursor onto a control and turns the wheel two ticks down there
     /// tab tabs 1             # switches the tabs control with that Name to its second page
+    /// hotkey mvgui_samples   # runs the handler of a registered hotkey, the way the key would
+    /// hide mvguiSample_confirm # hides the dialog with that name, or the one the named control is in
     /// chat off               # hides the vanilla chat window - it sits where a popup hangs out of a centred dialog; "chat on" brings it back
     /// close                  # hides the showcase
     /// cmd /time set 12:00    # sends a chat line: a server command with "/", a client command with "."
@@ -47,6 +53,11 @@ namespace ModernVintageGUI.Automation
     /// onquit cmd /time set 6 # only when the script ends with quit: a teardown that a run keeping the game open skips
     /// quit                   # leaves the world - which saves it - and closes the game
     /// </code>
+    ///
+    /// A control is named by its Name, a menu entry by its text. Every dialog of ours that is
+    /// showing is searched, the showcase first: "NAME:2" is the second control of that name in
+    /// tree order (nested split panels name their bars alike), "@TabsControl" the first control
+    /// of that type.
     ///
     /// Steps that change the UI run as main thread tasks, after the frame that asked for them,
     /// and the next step waits for that and for two more frames, so the change is on screen
@@ -462,6 +473,154 @@ namespace ModernVintageGUI.Automation
                         break;
                     }
 
+                case "drag":
+                    {
+                        // "drag NAME DX DY [MOVES]": press in the middle of a control, move the
+                        // cursor by DX, DY in that many moves and release - a bar of a split
+                        // panel, or anything else that captures the mouse.
+                        string name = Require(step, 0, "control name");
+                        int dx = ParseInt(step, Require(step, 1, "x distance"), "x distance");
+                        int dy = ParseInt(step, Require(step, 2, "y distance"), "y distance");
+                        int moves = step.Args.Length > 3 ? Math.Max(1, ParseInt(step, step.Args[3], "move count")) : 8;
+
+                        OnMainThread(() =>
+                        {
+                            UIControl control = Find(step, name);
+                            (CustomDialogElement dialog, int x, int y) = Center(control);
+
+                            dialog.HandleMouseMove(new MouseEvent(x, y, 0, 0));
+                            dialog.HandleMouseDown(new MouseEvent(x, y, EnumMouseButton.Left, 0));
+
+                            int lastX = x, lastY = y;
+
+                            for (int i = 1; i <= moves; i++)
+                            {
+                                int nextX = x + dx * i / moves;
+                                int nextY = y + dy * i / moves;
+
+                                dialog.HandleMouseMove(new MouseEvent(nextX, nextY, nextX - lastX, nextY - lastY));
+                                lastX = nextX;
+                                lastY = nextY;
+                            }
+
+                            dialog.HandleMouseUp(new MouseEvent(lastX, lastY, EnumMouseButton.Left, 0));
+                        });
+                        break;
+                    }
+
+                case "hotkey":
+                    {
+                        // "hotkey CODE": runs the handler of a registered hotkey, the way the
+                        // key would - "hotkey mvgui_samples" is K.
+                        string code = Require(step, 0, "hotkey code");
+
+                        OnMainThread(() =>
+                        {
+                            HotKey hotkey = capi.Input.GetHotKeyByCode(code)
+                                ?? throw new InvalidOperationException("no hotkey registered as '" + code + "'");
+
+                            if (hotkey.Handler == null)
+                                throw new InvalidOperationException("hotkey '" + code + "' has no handler");
+
+                            hotkey.Handler(hotkey.CurrentMapping);
+                        });
+                        break;
+                    }
+
+                case "key":
+                    {
+                        // "key KEY [NAME]": a key press, to the control with that name after
+                        // focusing it, or to the topmost dialog of ours. KEY is a GlKeys name.
+                        string keyName = Require(step, 0, "key name");
+                        string? name = step.Args.Length > 1 ? step.Args[1] : null;
+
+                        if (!Enum.TryParse(keyName, ignoreCase: true, out GlKeys key))
+                            throw new InvalidOperationException("'" + keyName + "' is not a GlKeys name");
+
+                        OnMainThread(() =>
+                        {
+                            CustomDialogElement dialog;
+
+                            if (name != null)
+                            {
+                                UIControl control = Find(step, name);
+                                dialog = control.Dialog ?? throw new InvalidOperationException("'" + name + "' is not in a shown dialog");
+                                dialog.FocusControl(control);
+
+                                if (!ReferenceEquals(dialog.FocusedControl, control))
+                                    throw new InvalidOperationException("'" + name + "' did not take the focus");
+                            }
+                            else
+                            {
+                                dialog = TopmostDialog(step);
+                            }
+
+                            dialog.HandleKeyDown(new IS2Mod.ControlTypes.Events.KeyEventArgs(key));
+                            dialog.HandleKeyUp(new IS2Mod.ControlTypes.Events.KeyEventArgs(key));
+                        });
+                        break;
+                    }
+
+                case "type":
+                    {
+                        // "type TEXT": the characters as key presses into the topmost dialog,
+                        // for a focused text field. Words are joined with single spaces.
+                        string text = string.Join(" ", step.Args);
+
+                        if (text.Length == 0)
+                            throw new InvalidOperationException("'type' needs text");
+
+                        OnMainThread(() =>
+                        {
+                            CustomDialogElement dialog = TopmostDialog(step);
+
+                            foreach (char c in text)
+                                dialog.HandleKeyPress(new IS2Mod.ControlTypes.Events.KeyEventArgs(GlKeys.Unknown, keyChar: c));
+                        });
+                        break;
+                    }
+
+                case "hide":
+                    {
+                        // "hide NAME": hides the dialog with that name, or the one a control
+                        // with that name is in.
+                        string name = Require(step, 0, "dialog or control name");
+
+                        OnMainThread(() =>
+                        {
+                            UIControl control = Find(step, name);
+                            CustomDialogElement dialog = control as CustomDialogElement
+                                ?? control.Dialog
+                                ?? throw new InvalidOperationException("'" + name + "' is not in a shown dialog");
+
+                            dialog.Hide();
+                        });
+                        break;
+                    }
+
+                case "wheel":
+                    {
+                        // "wheel NAME [TICKS]": moves the cursor onto a control and turns the
+                        // wheel by that many ticks there - negative scrolls down, the way the
+                        // game reads it; one tick down when no count is given.
+                        string name = Require(step, 0, "control name");
+                        int ticks = step.Args.Length > 1 ? ParseInt(step, step.Args[1], "tick count") : -1;
+
+                        OnMainThread(() =>
+                        {
+                            UIControl control = Find(step, name);
+                            (CustomDialogElement dialog, int x, int y) = Center(control);
+
+                            dialog.HandleMouseMove(new MouseEvent(x, y, 0, 0));
+                            dialog.HandleMouseWheel(new Vintagestory.API.Client.MouseWheelEventArgs
+                            {
+                                delta = ticks,
+                                deltaPrecise = ticks
+                            });
+                        });
+                        break;
+                    }
+
                 case "quit":
                     quitRequested = true;
                     Finish("ok");
@@ -501,6 +660,14 @@ namespace ModernVintageGUI.Automation
             }
 
             throw new InvalidOperationException("'" + value + "' is not a frame count, nor a duration like 2s or 500ms");
+        }
+
+        private static int ParseInt(Step step, string value, string what)
+        {
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+                throw new InvalidOperationException("'" + step.Verb + "': '" + value + "' is not a " + what);
+
+            return parsed;
         }
 
         private static string Require(Step step, int index, string what)
@@ -673,48 +840,93 @@ namespace ModernVintageGUI.Automation
         /// </summary>
         private UIControl Find(Step step, string name)
         {
-            if (showcase == null)
-                throw new InvalidOperationException("nothing is open - put 'open' before line " + step.Line);
+            // "NAME:2" is the second control of that name in tree order - nested split panels
+            // name their bars alike - and "@TabsControl" the first control of that type. (A
+            // colon, because "#" starts a comment in the script.) The showcase is searched
+            // first, then every other dialog that is showing, in the order they were opened:
+            // the sample windows are dialogs of their own.
+            int wanted = 1;
+            int colon = name.LastIndexOf(':');
 
-            return FindIn(showcase, name) ?? throw new InvalidOperationException("no control named '" + name + "'");
+            if (colon > 0 && int.TryParse(name.Substring(colon + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int index) && index > 0)
+            {
+                wanted = index;
+                name = name.Substring(0, colon);
+            }
+
+            var roots = new List<UIControl>();
+
+            if (showcase != null && showcase.IsVisible)
+                roots.Add(showcase);
+
+            if (UIManager.Current != null)
+            {
+                foreach (CustomDialogElement dialog in UIManager.Current.OpenDialogs)
+                {
+                    if (dialog.IsVisible && !ReferenceEquals(dialog, showcase))
+                        roots.Add(dialog);
+                }
+            }
+
+            if (roots.Count == 0)
+                throw new InvalidOperationException("nothing is open - put 'open', 'hotkey' or a 'cmd' that opens a dialog before line " + step.Line);
+
+            var matches = new List<UIControl>();
+
+            foreach (UIControl root in roots)
+                Collect(root, name, matches);
+
+            if (matches.Count < wanted)
+            {
+                throw new InvalidOperationException("no control named '" + name + "'"
+                    + (wanted > 1 ? " :" + wanted + " (" + matches.Count + " found)" : ""));
+            }
+
+            return matches[wanted - 1];
         }
 
-        private static UIControl? FindIn(UIControl root, string name)
+        private static void Collect(UIControl root, string name, List<UIControl> matches)
         {
-            if (root.Name == name)
-                return root;
+            bool byType = name.StartsWith("@", StringComparison.Ordinal);
 
-            if (root is ContextMenuItem item && item.Text == name)
-                return item;
+            if (byType ? root.GetType().Name == name.Substring(1) : root.Name == name)
+                matches.Add(root);
+            else if (!byType && root is CustomDialogElement dialog && dialog.DialogName == name)
+                matches.Add(dialog);
+            else if (!byType && root is ContextMenuItem item && item.Text == name)
+                matches.Add(item);
 
             foreach (UIControl child in root.Children)
-            {
-                UIControl? found = FindIn(child, name);
-                if (found != null)
-                    return found;
-            }
+                Collect(child, name, matches);
 
             if (root is ContextMenuControl menu)
             {
                 foreach (ContextMenuItem entry in menu.Items)
-                {
-                    UIControl? found = FindIn(entry, name);
-                    if (found != null)
-                        return found;
-                }
+                    Collect(entry, name, matches);
             }
 
             if (root is ContextMenuItem parent)
             {
                 foreach (ContextMenuItem entry in parent.ChildItems)
+                    Collect(entry, name, matches);
+            }
+        }
+
+        /// <summary>The dialog a key goes to when no control is named: the topmost one of ours.</summary>
+        private CustomDialogElement TopmostDialog(Step step)
+        {
+            if (UIManager.Current != null)
+            {
+                IReadOnlyList<CustomDialogElement> open = UIManager.Current.OpenDialogs;
+
+                for (int i = open.Count - 1; i >= 0; i--)
                 {
-                    UIControl? found = FindIn(entry, name);
-                    if (found != null)
-                        return found;
+                    if (open[i].IsVisible)
+                        return open[i];
                 }
             }
 
-            return null;
+            return showcase ?? throw new InvalidOperationException("nothing is open before line " + step.Line);
         }
 
         private static (CustomDialogElement dialog, int x, int y) Center(UIControl control)

@@ -143,7 +143,9 @@ if (-not (Test-Path (Join-Path $modPath 'mod\ModernVintageGUI.dll'))) {
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $stepText = Get-Content -Path $Steps -Raw
 if (-not $KeepOpen -and ($stepText -notmatch '(?m)^\s*quit\s*(#.*)?$')) {
-    $stepText = $stepText.TrimEnd() + "`r`nquit`r`n"
+    # In a section of its own, or the quit would belong to the script's last section and go
+    # with it when that section is skipped - leaving the game open that was meant to close.
+    $stepText = $stepText.TrimEnd() + "`r`nsection quit`r`nquit`r`n"
 }
 $runSteps = Join-Path $Out 'autoshot.steps'
 Set-Content -Path $runSteps -Value $stepText -Encoding utf8

@@ -26,7 +26,6 @@ namespace ModernVintageGUI.Samples
 
         private const double Width = 720.0;
         private const double Height = 460.0;
-        private const double UpperShare = 0.62;
 
         private static readonly string[] Machines = { "Quern", "Bloomery", "Kiln", "Helve hammer", "Pulverizer", "Windmill" };
 
@@ -126,10 +125,10 @@ namespace ModernVintageGUI.Samples
             mapPanel.Padding = 4;
 
             // --- Machines: a tree, with one node per machine and its parts under it.
+            // Sized by its nodes rather than a box: what does not fit its panel is scrolled.
             var machines = new TreeViewControl(_Name: "machines")
             {
-                Size = new PointD(180, 240),
-                IsAutoSize = false
+                IsAutoSize = true
             };
 
             foreach (string machine in Machines)
@@ -147,12 +146,10 @@ namespace ModernVintageGUI.Samples
             machinePanel.Name = "machinePanel";
             machinePanel.Padding = 4;
 
-            // --- The upper half: three panels.
+            // --- The upper half: three panels, at the split panel's default size. When the
+            // screen's bar is dragged up over it, the panel it sits in scrolls it.
             SplitPanelControl upper = UI.Split(Orientation.Left, stats, mapPanel, machinePanel);
             upper.Name = "upper";
-            // A little under the panel it sits in: its own margin on each side, and the bar.
-            upper.Size = new PointD(Width - 10, Height * UpperShare - 20);
-            upper.IsAutoSize = false;
 
             upper.SetFractions(0.30, 0.38, 0.32);
 
@@ -207,7 +204,6 @@ namespace ModernVintageGUI.Samples
             screen.Size = new PointD(Width, Height);
             screen.IsAutoSize = false;
 
-            screen.SetFractions(UpperShare, 1 - UpperShare);
             screen.SplitterMoved += (sender, e) => Log("Halves resized");
 
             parent.Add(UI.Row(

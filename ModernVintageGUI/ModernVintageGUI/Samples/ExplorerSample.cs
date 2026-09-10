@@ -12,8 +12,8 @@ namespace ModernVintageGUI.Samples
     ///
     /// Three panels side by side - categories as a tree, the entries of the picked category as
     /// a list, and the picked entry's details - and under all of that a log, with a horizontal
-    /// bar between the two halves. Every bar can be dragged; the panels clip whatever no longer
-    /// fits rather than reflowing it.
+    /// bar between the two halves. Every bar can be dragged; a panel dragged too small for its
+    /// content grows a scrollbar rather than reflowing it.
     ///
     /// The wiring is the everyday kind: the tree fills the list, the list fills the detail view
     /// (in <see cref="ListViewDetailMode.Attached"/>, so the panel stands still while the list is

@@ -162,6 +162,23 @@ dialog.Children.Add(save);
 
 <img src="docs/images/readme-buttons-hover.png" alt="Two stacked buttons, the upper one hovered" />
 
+<h2>Text that does not fit</h2>
+
+A control is never smaller than its text. A `TextLabelControl`, a `ButtonControl` or a
+`ProgressBarControl` that was given a `Size` too small for what it shows is measured at the text's
+size instead, so a dialog cannot squeeze a caption out of its button - and a dialog, which sizes
+itself from its content, is never smaller than what its texts need. `TextAutoSize = true` turns that
+round: the box stays what it was told and the text is drawn at the largest font size that fits it,
+down to 6. A wrapped label shrinks until its lines fit the height.
+
+```csharp
+var narrow = new ButtonControl(_Name: "narrow") { Text = "A caption wider than its box" };
+narrow.Size = new PointD(80, 30);
+narrow.IsAutoSize = false;          // grows to the caption
+
+narrow.TextAutoSize = true;         // or: keeps 80 x 30 and draws the caption smaller
+```
+
 <h2>Stacking</h2>
 
 A container stacks its children along `InsideOrientation` - `Top` (the default) downwards, `Left`
@@ -514,8 +531,10 @@ with vertical bars, `Top` or `Bottom` stacks them with horizontal bars. Give the
 its panels are shares of a whole, and a whole that grew to fit its content would leave nothing to
 share out. The shares are fractions rather than pixels, so they survive the GUI scale slider.
 
-The panels are ordinary `RectangleControl`s that clip, so content larger than its panel is cut at
-the bar rather than squashed. A hidden panel (`split.Panels[1].IsVisible = false`) takes its bar with
+The panels are ordinary `RectangleControl`s, and content larger than its panel is never squashed:
+it is cut at the bar, and the panel grows a scrollbar for it - only when one is needed, on the axis
+that overflows, gone again once the panel is dragged wide enough. `ScrollPanels = false` leaves the
+content cut instead. A hidden panel (`split.Panels[1].IsVisible = false`) takes its bar with
 it and hands its room to the others; showing it again gives it back. `MinPanelSize` (24 by default)
 is how small a drag can make a panel, `SplitterThickness` how wide the bar is, `IsResizable = false`
 locks the bars, and `AddPanel()` / `RemovePanel(i)` change the count at runtime. From the keyboard a
@@ -686,7 +705,7 @@ lists them. Each opens as its own dialog, so several can be compared side by sid
 
 | | Sample | What it exercises |
 | --- | --- | --- |
-| 1 | `confirm` | A question and two buttons. One expression. |
+| 1 | `confirm` | A question and two buttons. |
 | 2 | `settings` | A form: groups of checkboxes, a dropdown, a text field, a value with buttons either side, and Save that greys out until something changed. |
 | 3 | `explorer` | Tree, list and detail view in a three way split panel, over a log in a stacked split. Drag any bar. |
 | 4 | `workshop` | A crafting station: slots, a recipe picker with a turning 3D preview, a progress bar with buttons, tabs for the recipe book and a log. |

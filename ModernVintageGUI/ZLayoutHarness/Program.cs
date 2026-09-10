@@ -96,6 +96,7 @@ namespace LayoutHarness
             CheckClipping(failures);
             CheckScrolling(failures);
             CheckMaxSize(failures);
+            CheckTextFit(failures);
             CheckSplitPanel(failures);
             CheckPixelCanvasPainting(failures);
             CheckPixelCanvasAreas(failures);
@@ -1726,6 +1727,138 @@ namespace LayoutHarness
             }
 
             Console.WriteLine("  panels, bars, shares, drag, minimum, hiding and scale all hold");
+            Console.WriteLine();
+        }
+
+        /// <summary>
+        /// Text that does not fit its box. By default the box grows to the text - a label and a
+        /// button given a size too small for what they show come out at the text's size. With
+        /// TextAutoSize the box stays what it was told and the text shrinks, never below the
+        /// minimum font size. Both ways at two scales, and the grown box scales like everything.
+        /// </summary>
+        private static void CheckTextFit(List<string> failures)
+        {
+            Console.WriteLine("### text fit");
+            Console.WriteLine("A box too small for its text grows to the text, unless TextAutoSize lets the text shrink to the box.");
+            Console.WriteLine();
+
+            const string Caption = "A caption a good deal longer than its box";
+            const double BoxWidth = 40;
+            const double LabelHeight = 12;
+            const double ButtonHeight = 20;
+
+            double grownWidthAtOne = 0;
+
+            foreach (double scale in new[] { 1.0, 2.0 })
+            {
+                string at = "[text fit @ " + scale.ToString("0.#", CultureInfo.InvariantCulture) + "x] ";
+
+                var root = new RectangleControl(_Name: "root");
+                root.InsideOrientation = Orientation.Top;
+                root.Padding = 0;
+                root.LayoutScale = scale;
+
+                // Aligned left rather than the default Fill, so the column does not stretch the
+                // small boxes to the wide one and hide what is being checked.
+                var grows = new TextLabelControl(text: Caption, _Name: "grows")
+                {
+                    Size = new PointD(BoxWidth, LabelHeight),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left
+                };
+
+                var shrinks = new TextLabelControl(text: Caption, _Name: "shrinks")
+                {
+                    Size = new PointD(BoxWidth, LabelHeight),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left,
+                    TextAutoSize = true
+                };
+
+                var growsButton = new ButtonControl(_Name: "growsButton")
+                {
+                    Text = Caption,
+                    Size = new PointD(BoxWidth, ButtonHeight),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left
+                };
+
+                var shrinksButton = new ButtonControl(_Name: "shrinksButton")
+                {
+                    Text = Caption,
+                    Size = new PointD(BoxWidth, ButtonHeight),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left,
+                    TextAutoSize = true
+                };
+
+                root.Children.Add(grows);
+                root.Children.Add(shrinks);
+                root.Children.Add(growsButton);
+                root.Children.Add(shrinksButton);
+                root.PerformLayout();
+
+                // 1. The label grew to its text and kept its font.
+                PointD natural = grows.MeasureNaturalSize();
+
+                if (grows.Size.X < natural.X - 0.01 || grows.Size.Y < natural.Y - 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}a label too small for its text did not grow to it: {1:0.#}x{2:0.#} for text of {3:0.#}x{4:0.#}",
+                        at, grows.Size.X, grows.Size.Y, natural.X, natural.Y));
+                }
+
+                if (Math.Abs(grows.EffectiveFontSize - grows.FontSize) > 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}the grown label changed its font size to {1:0.#}", at, grows.EffectiveFontSize));
+                }
+
+                // 2. The TextAutoSize label kept its box and shrank its text, not below the minimum.
+                if (Math.Abs(shrinks.Size.X - BoxWidth * scale) > 0.01 || Math.Abs(shrinks.Size.Y - LabelHeight * scale) > 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}a TextAutoSize label did not keep its box: {1:0.#}x{2:0.#}", at, shrinks.Size.X, shrinks.Size.Y));
+                }
+
+                if (!(shrinks.EffectiveFontSize < shrinks.FontSize))
+                {
+                    failures.Add(at + "a TextAutoSize label did not shrink its text");
+                }
+
+                if (shrinks.EffectiveFontSize < TextLabelControl.UnscaledMinFontSize - 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}a TextAutoSize label shrank below the minimum: {1:0.#}", at, shrinks.EffectiveFontSize));
+                }
+
+                // 3. The same for a button: the one without TextAutoSize is wider than it was
+                //    told and no lower, the one with it is exactly what it was told.
+                if (growsButton.Size.X <= BoxWidth * scale + 1 || growsButton.Size.Y < ButtonHeight * scale - 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}a button too small for its caption did not grow: {1:0.#}x{2:0.#}", at, growsButton.Size.X, growsButton.Size.Y));
+                }
+
+                if (Math.Abs(shrinksButton.Size.X - BoxWidth * scale) > 0.01 || Math.Abs(shrinksButton.Size.Y - ButtonHeight * scale) > 0.01)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}a TextAutoSize button did not keep its box: {1:0.#}x{2:0.#}", at, shrinksButton.Size.X, shrinksButton.Size.Y));
+                }
+
+                // 4. And the grown box scales like every other authored dimension.
+                if (scale == 1.0)
+                {
+                    grownWidthAtOne = grows.Size.X;
+                }
+                else if (grownWidthAtOne > 0 && Math.Abs(grows.Size.X - grownWidthAtOne * scale) > grownWidthAtOne * scale * 0.02)
+                {
+                    failures.Add(string.Format(CultureInfo.InvariantCulture,
+                        "{0}the grown label does not scale: {1:0.#} at 1x, {2:0.#} at {3}x", at, grownWidthAtOne, grows.Size.X, scale));
+                }
+            }
+
+            Console.WriteLine("  a label and a button grow to their text by default, and keep their box with TextAutoSize");
             Console.WriteLine();
         }
 

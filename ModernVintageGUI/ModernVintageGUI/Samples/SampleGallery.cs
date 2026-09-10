@@ -137,10 +137,14 @@ namespace ModernVintageGUI.Samples
                     captured.Complexity + "  " + captured.Title,
                     open == null ? null : () => open(captured));
                 openButton.Name = "open_" + captured.Id;
-                openButton.Size = new PointD(150, 34);
+                openButton.Size = new PointD(180, 34);
                 openButton.IsAutoSize = false;
 
+                // A fixed size that wraps: the width is the column, the height is room for
+                // three lines of the small font, so the rows line up.
                 TextLabelControl description = UI.Paragraph(captured.Description, 330, 14);
+                description.Size = new PointD(330, 54);
+                description.IsAutoSize = false;
                 description.Margin = 6;
 
                 parent.Add(UI.Row(openButton, description));

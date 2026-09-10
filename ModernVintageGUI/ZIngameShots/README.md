@@ -56,7 +56,13 @@ One per line, `#` starts a comment.
 | `menu OWNER` | shows the context menu attached to the control with that `Name`; `menu OWNER close` hides it |
 | `hover NAME` | moves the cursor onto the middle of a control |
 | `click NAME` | presses and releases the left button there |
+| `drag NAME DX DY` | presses there, moves the cursor by DX, DY in eight moves and releases - a split panel bar, or anything else that captures the mouse; a fourth number is the move count |
+| `key KEY [NAME]` | presses a key (a `GlKeys` name) - after focusing the named control, or in the topmost dialog of ours: `key Escape` |
+| `type TEXT` | types the characters into the topmost dialog, for a focused text field |
+| `wheel NAME [TICKS]` | moves the cursor onto a control and turns the wheel there - negative ticks scroll down, one down when no count is given |
 | `tab NAME 1` | switches the tabs control with that `Name` to its second page |
+| `hotkey CODE` | runs the handler of a registered hotkey the way the key would - `hotkey mvgui_samples` is K |
+| `hide NAME` | hides the dialog with that name, or the dialog the named control is in |
 | `chat off` | hides the vanilla chat window, which sits where a popup hangs out of a centred dialog; `chat on` brings it back, and a run that leaves the game open does that itself |
 | `cmd LINE` | sends a chat line as the player would type it: `/...` goes to the server, `.…` runs a client command |
 | `section NAME` | not a step: names the steps after it, up to the next `section` line, so that `-Skip NAME` can leave them out; a name may recur |
@@ -72,7 +78,11 @@ scene standing for a look around.
 
 `NAME` is the `Name` a control was built with - `textDropdown`, `menuButton`, `saveButton` and so
 on in [ControlShowcase.cs](../ModernVintageGUI/Samples/ControlShowcase.cs). A menu entry can be
-named by its text.
+named by its text. Every dialog of ours that is showing is searched, the showcase first - so the
+sample windows opened with `cmd .mvsui sample explorer` or `hotkey mvgui_samples` can be driven
+too. `NAME:2` is the second control of that name in tree order (nested split panels name their
+bars alike, `_splitter0`), `@TabsControl` the first control of that type.
+[steps/samples.txt](steps/samples.txt) drives all five sample windows that way.
 
 A step that changes the UI runs after the frame that asked for it, and the next step waits two
 more frames, so what it changed is on screen before a `shot` that follows.

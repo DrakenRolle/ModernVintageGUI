@@ -1,0 +1,175 @@
+# The five sample windows: opened by command and by the K hotkey, driven by name and
+# photographed. The chat stays on so the ShowChatMessage lines of the samples are in the
+# full window pictures.
+#
+# Run with:   ZIngameShots\ingame-screenshot.ps1 -Steps .\steps\samples.txt
+#
+# Names: the buttons and fields are the _Name arguments in Samples/*.cs, a tab page is
+# "<Caption>_tab", and the bars of a split panel are "<split name>_splitter0", "_splitter1" and
+# so on - browser_splitter0 and screen_splitter0 in the explorer, upper_splitter0 and
+# screen_splitter0 in the dashboard.
+
+wait 2s
+
+section commands
+cmd .mvsui sample                    # lists the samples in the chat
+wait 5
+cmd .mvsui sample nothere            # the error path
+wait 5
+shot samples-00-command.png
+
+section gallery
+hotkey mvgui_samples                 # what K does
+wait 10
+shot samples-01-gallery.png crop 8
+
+section confirm
+click open_confirm                   # the gallery opens the confirm sample
+wait 10
+shot samples-02-confirm.png crop 8
+click discardButton
+wait 5
+shot samples-03-confirm-discard.png  # chat: "Confirm: discarded"
+click keepButton
+wait 5
+hide mvguiSample_confirm
+hide mvguiSampleGallery
+wait 5
+
+section settings
+cmd .mvsui sample settings
+wait 10
+shot samples-04-settings.png crop 8
+click tooltips
+click volumeUp
+click volumeUp
+click volumeDown
+wait 5
+shot samples-05-settings-changed.png crop 8   # Save enabled, volume 70%, tooltips off
+dropdown difficulty
+wait 5
+shot samples-06-settings-dropdown.png crop 8
+dropdown difficulty close
+click playerName
+type Dennis
+key Enter
+wait 5
+click saveButton
+wait 5
+shot samples-07-settings-saved.png   # chat: "Settings saved: ..."; Save greyed out again
+click cancelButton
+wait 5
+hide mvguiSample_settings
+wait 5
+
+section explorer
+cmd .mvsui sample explorer
+wait 10
+shot samples-10-explorer.png crop 8
+drag browser_splitter0 80 0               # browser: tree | list bar to the right
+wait 5
+drag browser_splitter1 -60 0               # browser: list | details bar to the left
+wait 5
+drag screen_splitter0 0 -80             # the screen's horizontal bar upwards
+wait 5
+shot samples-11-explorer-dragged.png crop 8
+key Left browser_splitter0                 # keyboard: the focused bar steps left
+key Left
+key Left
+wait 5
+shot samples-12-explorer-keyboard.png crop 8
+key Escape                           # closes the dialog
+wait 5
+
+section workshop
+cmd .mvsui sample workshop
+wait 10
+shot samples-15-workshop.png crop 8  # the 3D preview shows a block
+click workButton
+click workButton
+wait 5
+shot samples-16-workshop-progress.png crop 8   # 2 / 4
+click repeat
+click workButton
+click workButton
+click workButton
+wait 5
+shot samples-17-workshop-finished.png          # chat: "Finished: 1 copper ingot", repeat on
+dropdown recipePicker
+wait 5
+shot samples-18-workshop-recipes.png crop 8
+dropdown recipePicker close
+click resetButton
+click Log_tab
+wait 5
+shot samples-19-workshop-log.png crop 8
+hide mvguiSample_workshop
+wait 5
+
+section dashboard
+cmd .mvsui sample dashboard
+wait 10
+shot samples-20-dashboard.png crop 8
+click tickButton
+click tickButton
+wait 5
+click Alerts_tab
+wait 5
+shot samples-21-dashboard-alerts.png crop 8
+drag screen_splitter0 0 -150             # the halves: the switches page needs the room
+wait 5
+click Switches_tab
+wait 5
+shot samples-22-dashboard-switches.png crop 8
+click showMap                        # hides the middle panel and its bar
+wait 5
+shot samples-23-dashboard-map-hidden.png crop 8
+click showMap
+click lockBars
+drag upper_splitter0 100 0               # locked: must not move
+wait 5
+shot samples-24-dashboard-locked.png crop 8
+click lockBars
+drag upper_splitter0 100 0               # unlocked: moves
+wait 5
+shot samples-25-dashboard-dragged.png crop 8
+click equalise
+wait 5
+shot samples-26-dashboard-equal.png crop 8
+click freeze                         # the upper half greys out
+wait 5
+shot samples-27-dashboard-frozen.png crop 8
+click freeze
+click clearLog
+click Log_tab
+wait 5
+shot samples-28-dashboard-cleared.png crop 8
+hide mvguiSample_dashboard
+wait 5
+
+section scrolling
+cmd .mvsui sample dashboard
+wait 10
+drag screen_splitter0 0 -150             # the upper half short: its panel scrolls the split inside it
+wait 5
+shot samples-29-dashboard-scrollbars.png crop 8
+wheel stats -3                       # the stats panel is only as wide as its bar allows: it scrolls sideways
+wait 5
+shot samples-29b-dashboard-wheeled.png crop 8
+drag screen_splitter0 0 150
+wait 5
+hide mvguiSample_dashboard
+wait 5
+
+section reopen
+cmd .mvsui sample dashboard          # the same dialog again: state kept
+wait 10
+cmd .mvsui sample explorer           # two samples side by side
+wait 10
+shot samples-30-two-samples.png crop 8
+hotkey mvgui_samples                 # the gallery on top
+wait 5
+shot samples-31-three-dialogs.png crop 8
+hotkey mvgui_samples                 # and toggled off again
+wait 5
+shot samples-32-gallery-toggled-off.png crop 8
