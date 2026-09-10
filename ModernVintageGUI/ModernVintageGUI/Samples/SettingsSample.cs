@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
@@ -37,7 +38,9 @@ namespace ModernVintageGUI.Samples
             var settings = new Settings();
             bool dirty = false;
 
-            ButtonControl save = UI.Button("Save", null, GuiIcons.Import).WithName("saveButton").Enabled(false);
+            ButtonControl save = UI.Button("Save", null, GuiIcons.Import);
+            save.Name = "saveButton";
+            save.IsEnabled = false;
 
             void Touched()
             {
@@ -45,7 +48,10 @@ namespace ModernVintageGUI.Samples
                 save.IsEnabled = true;
             }
 
-            ProgressBarControl volume = UI.Progress(settings.Volume, Percent(settings.Volume)).WithName("volume");
+            ProgressBarControl volume = UI.Progress(settings.Volume, Percent(settings.Volume));
+            volume.Name = "volume";
+            volume.Size = new PointD(150, 26);
+            volume.IsAutoSize = false;
 
             void SetVolume(double value)
             {
@@ -58,9 +64,9 @@ namespace ModernVintageGUI.Samples
             // Kept in a variable so the starting choice can be set after the handler is wired
             // without the form counting that as a change.
             DropdownControl difficulty = UI.Dropdown(
-                    pick => { settings.Difficulty = pick; Touched(); },
-                    "Peaceful", "Normal", "Hard")
-                .WithName("difficulty");
+                pick => { settings.Difficulty = pick; Touched(); },
+                "Peaceful", "Normal", "Hard");
+            difficulty.Name = "difficulty";
 
             save.Clicked += (sender, e) =>
             {
@@ -73,41 +79,69 @@ namespace ModernVintageGUI.Samples
                     $"name='{settings.PlayerName}', volume={Percent(settings.Volume)}");
             };
 
+            // --- Display
+            CheckboxControl tooltips = UI.Checkbox("Show tooltips", settings.ShowTooltips, on => { settings.ShowTooltips = on; Touched(); });
+            tooltips.Name = "tooltips";
+
+            CheckboxControl largeText = UI.Checkbox("Large text", settings.LargeText, on => { settings.LargeText = on; Touched(); });
+            largeText.Name = "largeText";
+
+            // --- Sound
+            CheckboxControl sounds = UI.Checkbox("Play sounds", settings.PlaySounds, on => { settings.PlaySounds = on; Touched(); });
+            sounds.Name = "sounds";
+
+            TextLabelControl volumeLabel = UI.Label("Volume");
+            volumeLabel.Size = new PointD(70, 26);
+            volumeLabel.IsAutoSize = false;
+
+            ButtonControl volumeDown = UI.Button("-", () => SetVolume(settings.Volume - 0.1));
+            volumeDown.Name = "volumeDown";
+            volumeDown.Size = new PointD(32, 26);
+            volumeDown.IsAutoSize = false;
+
+            ButtonControl volumeUp = UI.Button("+", () => SetVolume(settings.Volume + 0.1));
+            volumeUp.Name = "volumeUp";
+            volumeUp.Size = new PointD(32, 26);
+            volumeUp.IsAutoSize = false;
+
+            // --- Game
+            TextLabelControl difficultyLabel = UI.Label("Difficulty");
+            difficultyLabel.Size = new PointD(90, 30);
+            difficultyLabel.IsAutoSize = false;
+
+            TextLabelControl nameLabel = UI.Label("Your name");
+            nameLabel.Size = new PointD(90, 30);
+            nameLabel.IsAutoSize = false;
+
+            TextInputControl playerName = UI.TextBox("Type a name and press Enter", text => { settings.PlayerName = text; Touched(); });
+            playerName.Name = "playerName";
+
+            // --- Cancel and Save, at the right.
+            ButtonControl cancel = UI.Button("Cancel", () => capi?.ShowChatMessage(dirty ? "Settings: changes dropped" : "Settings: nothing to drop"));
+            cancel.Name = "cancelButton";
+
+            RectangleControl buttons = UI.Row(cancel, save);
+            buttons.Orientation = Orientation.Right;
+
             parent.Add(UI.Column(
                 UI.Title("Settings"),
 
                 UI.Group(
                     UI.Heading("Display"),
-                    UI.Checkbox("Show tooltips", settings.ShowTooltips, on => { settings.ShowTooltips = on; Touched(); })
-                        .WithName("tooltips"),
-                    UI.Checkbox("Large text", settings.LargeText, on => { settings.LargeText = on; Touched(); })
-                        .WithName("largeText")),
+                    tooltips,
+                    largeText),
 
                 UI.Group(
                     UI.Heading("Sound"),
-                    UI.Checkbox("Play sounds", settings.PlaySounds, on => { settings.PlaySounds = on; Touched(); })
-                        .WithName("sounds"),
-                    UI.Row(
-                        UI.Label("Volume").WithSize(70, 26),
-                        UI.Button("-", () => SetVolume(settings.Volume - 0.1)).WithSize(32, 26).WithName("volumeDown"),
-                        volume.WithSize(150, 26),
-                        UI.Button("+", () => SetVolume(settings.Volume + 0.1)).WithSize(32, 26).WithName("volumeUp"))),
+                    sounds,
+                    UI.Row(volumeLabel, volumeDown, volume, volumeUp)),
 
                 UI.Group(
                     UI.Heading("Game"),
-                    UI.Row(
-                        UI.Label("Difficulty").WithSize(90, 30),
-                        difficulty),
-                    UI.Row(
-                        UI.Label("Your name").WithSize(90, 30),
-                        UI.TextBox("Type a name and press Enter", text => { settings.PlayerName = text; Touched(); })
-                            .WithName("playerName"))),
+                    UI.Row(difficultyLabel, difficulty),
+                    UI.Row(nameLabel, playerName)),
 
-                UI.Row(
-                        UI.Button("Cancel", () => capi?.ShowChatMessage(dirty ? "Settings: changes dropped" : "Settings: nothing to drop"))
-                            .WithName("cancelButton"),
-                        save)
-                    .Aligned(Orientation.Right)));
+                buttons));
 
             // The dropdown started on its first entry; the form starts on Normal. Picking it
             // runs the handler above, which marks the form dirty - undone right after, so the

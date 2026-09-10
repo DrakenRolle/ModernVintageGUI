@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.ControlTypes.Custom;
 using IS2Mod.Enums;
@@ -132,15 +133,17 @@ namespace ModernVintageGUI.Samples
             {
                 SampleWindow captured = sample;
 
-                RectangleControl row = UI.Row(
-                    UI.Button(
-                            captured.Complexity + "  " + captured.Title,
-                            open == null ? null : () => open(captured))
-                        .WithSize(150, 34)
-                        .WithName("open_" + captured.Id),
-                    UI.Paragraph(captured.Description, 330, 14).WithMargin(6));
+                ButtonControl openButton = UI.Button(
+                    captured.Complexity + "  " + captured.Title,
+                    open == null ? null : () => open(captured));
+                openButton.Name = "open_" + captured.Id;
+                openButton.Size = new PointD(150, 34);
+                openButton.IsAutoSize = false;
 
-                parent.Add(row);
+                TextLabelControl description = UI.Paragraph(captured.Description, 330, 14);
+                description.Margin = 6;
+
+                parent.Add(UI.Row(openButton, description));
             }
         }
 
@@ -159,7 +162,10 @@ namespace ModernVintageGUI.Samples
 
             dialog.Add(new TitleBarControl(sample.Title) { Name = "titleBar" });
 
-            RectangleControl content = dialog.Add(UI.Panel(10).WithName("content"));
+            RectangleControl content = UI.Panel(10);
+            content.Name = "content";
+            dialog.Add(content);
+
             sample.Build(content, capi);
 
             return dialog;
@@ -178,7 +184,10 @@ namespace ModernVintageGUI.Samples
 
             dialog.Add(new TitleBarControl("Sample windows") { Name = "titleBar" });
 
-            RectangleControl content = dialog.Add(UI.Column().WithName("content"));
+            RectangleControl content = UI.Column();
+            content.Name = "content";
+            dialog.Add(content);
+
             BuildGallery(content, open);
 
             return dialog;

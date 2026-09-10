@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
@@ -57,23 +58,31 @@ namespace ModernVintageGUI.Samples
             bool autoRepeat = false;
 
             // --- Log, first, because the rest writes into it.
-            RectangleControl log = UI.Scroll(220, 190).WithName("log");
+            RectangleControl log = UI.Scroll(220, 190);
+            log.Name = "log";
 
             void Log(string line)
             {
-                log.Children.Add(UI.Label(line, 14).WithName("logLine" + log.Children.Count));
+                TextLabelControl entry = UI.Label(line, 14);
+                entry.Name = "logLine" + log.Children.Count;
+                log.Children.Add(entry);
                 log.ScrollTo(0, double.MaxValue);
                 capi?.ShowChatMessage("Workshop: " + line);
             }
 
             // --- The middle: preview, picker, progress, buttons.
-            var viewer = new ShapeViewerControl(_Name: "preview").WithSize(140, 140);
+            var viewer = new ShapeViewerControl(_Name: "preview")
+            {
+                Size = new PointD(140, 140),
+                IsAutoSize = false,
+                Orientation = Orientation.Center
+            };
             ShowSomething(capi, viewer);
 
-            ProgressBarControl progress = UI.Progress(0, "Idle")
-                .WithName("progress")
-                .WithSize(200, ProgressBarControl.UnscaledDefaultHeight);
-
+            ProgressBarControl progress = UI.Progress(0, "Idle");
+            progress.Name = "progress";
+            progress.Size = new PointD(200, ProgressBarControl.UnscaledDefaultHeight);
+            progress.IsAutoSize = false;
             progress.BarColor = new ElementColor(0.75, 0.45, 0.15, 1.0);
 
             void UpdateProgress()
@@ -129,22 +138,32 @@ namespace ModernVintageGUI.Samples
                 stepsDone = 0;
                 UpdateProgress();
                 Log("Recipe: " + recipe.Name + " (" + recipe.Needs + ")");
-            }, recipeNames).WithName("recipePicker");
+            }, recipeNames);
+            picker.Name = "recipePicker";
+
+            TextLabelControl hint = UI.Label("Right drag turns the preview", 13);
+            hint.Orientation = Orientation.Center;
+
+            ButtonControl work = UI.Button("Work", Work, GuiIcons.Handheld);
+            work.Name = "workButton";
+
+            ButtonControl reset = UI.Button("Reset", Reset, GuiIcons.Undo);
+            reset.Name = "resetButton";
+
+            CheckboxControl repeat = UI.Checkbox("Repeat automatically", autoRepeat, on => { autoRepeat = on; Log(on ? "Repeat on" : "Repeat off"); });
+            repeat.Name = "repeat";
 
             RectangleControl middle = UI.Column(
                 UI.Heading("Recipe"),
                 picker,
-                viewer.Aligned(Orientation.Center),
-                UI.Label("Right drag turns the preview", 13).Aligned(Orientation.Center),
+                viewer,
+                hint,
                 UI.Heading("Progress"),
                 progress,
-                UI.Row(
-                    UI.Button("Work", Work, GuiIcons.Handheld).WithName("workButton"),
-                    UI.Button("Reset", Reset, GuiIcons.Undo).WithName("resetButton")),
-                UI.Checkbox("Repeat automatically", autoRepeat, on => { autoRepeat = on; Log(on ? "Repeat on" : "Repeat off"); })
-                    .WithName("repeat"))
-                .WithName("middle")
-                .WithPadding(4);
+                UI.Row(work, reset),
+                repeat);
+            middle.Name = "middle";
+            middle.Padding = 4;
 
             // --- The left: slots.
             var input = new InventoryGridControl(columns: 3, _Name: "inputSlots");
@@ -162,12 +181,16 @@ namespace ModernVintageGUI.Samples
                 UI.Heading("Fuel"),
                 fuel,
                 UI.Heading("Output"),
-                output)
-                .WithName("left")
-                .WithPadding(4);
+                output);
+            left.Name = "left";
+            left.Padding = 4;
 
             // --- The right: the recipe book and the log, as tabs.
-            var book = new ListViewControl(_Name: "recipeBook").WithSize(220, 190);
+            var book = new ListViewControl(_Name: "recipeBook")
+            {
+                Size = new PointD(220, 190),
+                IsAutoSize = false
+            };
             var rows = new List<ListViewItem>();
 
             foreach (Recipe entry in Recipes)
@@ -195,12 +218,15 @@ namespace ModernVintageGUI.Samples
             RectangleControl right = UI.Column(
                 UI.Tabs(
                     ("Recipes", book),
-                    ("Log", log)))
-                .WithName("right")
-                .WithPadding(4);
+                    ("Log", log)));
+            right.Name = "right";
+            right.Padding = 4;
+
+            RectangleControl body = UI.Row(left, middle, right);
+            body.Name = "body";
 
             parent.Add(UI.Title("Workshop"));
-            parent.Add(UI.Row(left, middle, right).WithName("body"));
+            parent.Add(body);
 
             UpdateProgress();
             Log("Station ready. Pick a recipe and press Work.");

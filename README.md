@@ -89,8 +89,9 @@ opens and takes the picture, so it cannot show a screen that no longer exists.*
   vertically (panels side by side) or horizontally (panels stacked), and the shares are kept as
   fractions so they survive the GUI scale slider
 * **A short syntax.** `UI.Column(UI.Heading("Save"), UI.Row(UI.Button("Yes", Save), UI.Button("No")))`
-  builds the tree it reads like, and every control takes `.WithSize(w, h)`, `.WithName(n)`,
-  `.Aligned(...)` and friends. Optional - the constructors and object initializers still work
+  builds the tree it reads like, and `parent.Add(child)` hands the child back. Values are still set
+  through properties, never through a chain of methods. Optional - the constructors and object
+  initializers still work
 * **Five sample windows** of rising complexity, from a confirm box to a dashboard of nested split
   panels, on the K hotkey - test UIs for the framework and worked examples for a mod
 
@@ -218,30 +219,34 @@ and so does anything in an overlay container, which stacks in no direction at al
 <h2>The short way</h2>
 
 Everything above can also be written as the tree it is. `UI` builds controls with the dialog's font
-and colour already set, and the fluent helpers hand the control back so a line can configure it and
-add it at once:
+and colour already set, and `Add` hands the child back so it can be kept in a variable in the line
+that adds it:
 
 ```csharp
+RectangleControl answers = UI.Row(
+    UI.Button("Keep editing", () => dialog.Hide()),
+    UI.Button("Discard", Discard, GuiIcons.Eraser));
+answers.Orientation = Orientation.Right;
+
 dialog.Add(UI.Column(
     UI.Title("Discard the changes?"),
     UI.Paragraph("The recipe was edited and not saved. Closing now throws the edits away.", 320),
-    UI.Row(
-            UI.Button("Keep editing", () => dialog.Hide()),
-            UI.Button("Discard", Discard, GuiIcons.Eraser))
-        .Aligned(Orientation.Right)));
+    answers));
 
-var save = column.Add(UI.Button("Save", Save).WithSize(160, 40));   // Add returns the child
+var save = column.Add(UI.Button("Save", Save));   // Add returns the child
+save.Size = new PointD(160, 40);
+save.IsAutoSize = false;
 ```
 
 `UI.Column`, `UI.Row`, `UI.Overlay`, `UI.Panel`, `UI.Group`, `UI.Scroll`, `UI.Split` and `UI.Tabs`
 are the containers; `UI.Label`, `UI.Heading`, `UI.Title`, `UI.Paragraph`, `UI.Button`, `UI.Checkbox`,
-`UI.TextBox`, `UI.Dropdown`, `UI.Progress`, `UI.Icon` and `UI.Spacer` the controls. On any control:
-`.WithSize(w, h)` (a fixed size, which is `Size` plus `IsAutoSize = false`), `.WithName`, `.WithMargin`,
-`.WithPadding`, `.WithMaxSize`, `.Aligned`, `.Enabled`, `.Visible`, `.Clipping` and `.OnClick`. All of
-it is optional and returns the concrete control, so anything the helper does not cover is set right
-after. The sample windows under `Samples/` are written this way throughout;
-[docs/syntax-review.md](docs/syntax-review.md) has the reasoning and the things that were left as they
-are.
+`UI.TextBox`, `UI.Dropdown`, `UI.Progress`, `UI.Icon` and `UI.Spacer` the controls. Each returns the
+concrete control, and everything the helper does not cover - a name, a fixed size, an alignment - is
+assigned to its properties afterwards, exactly as on a control made with `new`. There is deliberately
+no `.WithSize(...)` or `.WithName(...)`: values go through properties, and the only call that chains is
+`Add`, because adding a child is the one thing a property cannot do. The sample windows under
+`Samples/` are written this way throughout; [docs/syntax-review.md](docs/syntax-review.md) has the
+reasoning and the things that were left as they are.
 
 <h2>Keyboard</h2>
 

@@ -27,10 +27,20 @@ namespace ModernVintageGUI
     ///         UI.Button("Cancel", dialog.Hide))));
     /// </code>
     ///
-    /// The helpers return the concrete control, so anything they do not cover is set in an
-    /// object initializer or afterwards - <c>UI.Button("Save", Save).WithSize(160, 40)</c> - and
-    /// the fluent extensions in <see cref="UIControlExtensions"/> hand the control back so the
-    /// chain does not end.
+    /// The helpers return the concrete control, so anything they do not cover - a name, a fixed
+    /// size, an alignment - is assigned to its properties afterwards, the same way it is on a
+    /// control made with <c>new</c>:
+    ///
+    /// <code>
+    /// ButtonControl save = UI.Button("Save", Save);
+    /// save.Name = "saveButton";
+    /// save.Size = new PointD(160, 40);
+    /// save.IsAutoSize = false;
+    /// </code>
+    ///
+    /// The only thing that chains is adding children: <see cref="UIControlExtensions.Add{T}"/>
+    /// hands the child back and <c>AddRange</c> the parent, so a tree can be written as the tree
+    /// it is. Values are never set through a method.
     /// </summary>
     public static class UI
     {
@@ -116,7 +126,8 @@ namespace ModernVintageGUI
                 InsideOrientation = Orientation.Top
             };
 
-            box.WithSize(width, height);
+            box.Size = new PointD(width, height);
+            box.IsAutoSize = false;
             box.EnableVerticalScrollbar = true;
 
             box.AddRange(children);
@@ -161,7 +172,11 @@ namespace ModernVintageGUI
         /// </summary>
         public static RectangleControl Spacer(double width, double height)
         {
-            return new RectangleControl(borderWidth: 0, _Margin: 0, _Padding: 0).WithSize(width, height);
+            return new RectangleControl(borderWidth: 0, _Margin: 0, _Padding: 0)
+            {
+                Size = new PointD(width, height),
+                IsAutoSize = false
+            };
         }
         #endregion
 
@@ -340,8 +355,11 @@ namespace ModernVintageGUI
     }
 
     /// <summary>
-    /// Fluent helpers on every control. Each one returns what it was called on, typed as it was
-    /// passed in, so a control can be configured and put into its parent in one expression.
+    /// Adding children, on every control. <see cref="Add{T}"/> hands the child back and
+    /// <c>AddRange</c> the parent, so a tree can be built in one expression. This is the one
+    /// place a call returns a control to go on with: values are set through properties, not
+    /// through methods, so there is no <c>WithSize</c> or <c>WithName</c> here and there will
+    /// not be.
     /// </summary>
     public static class UIControlExtensions
     {
@@ -404,86 +422,6 @@ namespace ModernVintageGUI
             }
 
             return parent;
-        }
-
-        /// <summary>
-        /// A fixed size in author units. This is the pair <c>Size = ...; IsAutoSize = false;</c>
-        /// that every fixed size control needs and that is easy to write half of.
-        /// </summary>
-        public static T WithSize<T>(this T control, double width, double height) where T : UIControl
-        {
-            control.Size = new PointD(width, height);
-            control.IsAutoSize = false;
-            return control;
-        }
-
-        /// <summary>Back to sizing from the content.</summary>
-        public static T AutoSized<T>(this T control) where T : UIControl
-        {
-            control.IsAutoSize = true;
-            return control;
-        }
-
-        public static T WithName<T>(this T control, string name) where T : UIControl
-        {
-            control.Name = name;
-            return control;
-        }
-
-        public static T WithMargin<T>(this T control, double margin) where T : UIControl
-        {
-            control.Margin = margin;
-            return control;
-        }
-
-        public static T WithPadding<T>(this T control, double padding) where T : UIControl
-        {
-            control.Padding = padding;
-            return control;
-        }
-
-        /// <summary>Where the control sits across its parent's stacking direction.</summary>
-        public static T Aligned<T>(this T control, Orientation orientation) where T : UIControl
-        {
-            control.Orientation = orientation;
-            return control;
-        }
-
-        /// <summary>An upper limit for an auto sizing control, in author units. Zero means no limit on that axis.</summary>
-        public static T WithMaxSize<T>(this T control, double width, double height) where T : UIControl
-        {
-            control.MaxSize = new PointD(width, height);
-            return control;
-        }
-
-        public static T Enabled<T>(this T control, bool enabled) where T : UIControl
-        {
-            control.IsEnabled = enabled;
-            return control;
-        }
-
-        public static T Visible<T>(this T control, bool visible) where T : UIControl
-        {
-            control.IsVisible = visible;
-            return control;
-        }
-
-        /// <summary>Cut what the children draw at the edge of this control.</summary>
-        public static T Clipping<T>(this T control, bool clips = true) where T : UIControl
-        {
-            control.ClipsChildren = clips;
-            return control;
-        }
-
-        /// <summary>Subscribes to <see cref="UIControl.Clicked"/> without the event arguments.</summary>
-        public static T OnClick<T>(this T control, Action handler) where T : UIControl
-        {
-            if (handler != null)
-            {
-                control.Clicked += (sender, e) => handler();
-            }
-
-            return control;
         }
     }
 }

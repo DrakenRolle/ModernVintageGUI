@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
@@ -74,12 +75,15 @@ namespace ModernVintageGUI.Samples
             parent.InsideOrientation = Orientation.Top;
 
             // The log first, because everything else writes into it.
-            RectangleControl log = UI.Scroll(Width - 20, 70).WithName("log");
+            RectangleControl log = UI.Scroll(Width - 20, 70);
+            log.Name = "log";
             log.Padding = 4;
 
             void Log(string line)
             {
-                log.Children.Add(UI.Label(line, 14).WithName("logLine" + log.Children.Count));
+                TextLabelControl entry = UI.Label(line, 14);
+                entry.Name = "logLine" + log.Children.Count;
+                log.Children.Add(entry);
 
                 // The newest line at the bottom, where the eye is.
                 log.ScrollTo(0, double.MaxValue);
@@ -89,13 +93,22 @@ namespace ModernVintageGUI.Samples
             // Details on the right. Attached mode: the list fills it, this code places it.
             var list = new ListViewControl(_Name: "entries")
             {
-                DetailMode = ListViewDetailMode.Attached
-            }.WithSize(200, 280);
+                DetailMode = ListViewDetailMode.Attached,
+                Size = new PointD(200, 280),
+                IsAutoSize = false
+            };
 
-            DetailViewControl details = list.DetailView.WithSize(200, 280).WithName("details");
+            DetailViewControl details = list.DetailView;
+            details.Name = "details";
+            details.Size = new PointD(200, 280);
+            details.IsAutoSize = false;
 
             // Categories on the left.
-            var tree = new TreeViewControl(_Name: "categories").WithSize(150, 280);
+            var tree = new TreeViewControl(_Name: "categories")
+            {
+                Size = new PointD(150, 280),
+                IsAutoSize = false
+            };
 
             TreeNode materials = tree.AddNode("Materials", iconName: GuiIcons.Basket);
             materials.Add("Rock", "rock", GuiIcons.Erode);
@@ -131,25 +144,23 @@ namespace ModernVintageGUI.Samples
             };
 
             // The browser: three panels, the middle one widest.
-            SplitPanelControl browser = UI.Split(
-                    Orientation.Left,
-                    tree,
-                    list,
-                    details)
-                .WithName("browser")
-                // A little under the panel it sits in: its own margin on each side, and the bar.
-                .WithSize(Width - 10, Height * BrowserShare - 20);
+            SplitPanelControl browser = UI.Split(Orientation.Left, tree, list, details);
+            browser.Name = "browser";
+            // A little under the panel it sits in: its own margin on each side, and the bar.
+            browser.Size = new PointD(Width - 10, Height * BrowserShare - 20);
+            browser.IsAutoSize = false;
 
             browser.SetFractions(0.25, 0.40, 0.35);
             browser.SplitterMoved += (sender, e) => Log("Browser bar " + e.SplitterIndex + " moved");
 
             // And the whole screen: the browser over the log, with a horizontal bar between.
             SplitPanelControl screen = UI.Split(
-                    Orientation.Top,
-                    browser,
-                    UI.Column(UI.Heading("Log"), log))
-                .WithName("screen")
-                .WithSize(Width, Height);
+                Orientation.Top,
+                browser,
+                UI.Column(UI.Heading("Log"), log));
+            screen.Name = "screen";
+            screen.Size = new PointD(Width, Height);
+            screen.IsAutoSize = false;
 
             screen.SetFractions(BrowserShare, 1 - BrowserShare);
 
