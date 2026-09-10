@@ -74,8 +74,7 @@ namespace ModernVintageGUI.Samples
             var viewer = new ShapeViewerControl(_Name: "preview")
             {
                 Size = new PointD(140, 140),
-                IsAutoSize = false,
-                Orientation = Orientation.Center
+                IsAutoSize = false
             };
             ShowSomething(capi, viewer);
 
@@ -141,9 +140,6 @@ namespace ModernVintageGUI.Samples
             }, recipeNames);
             picker.Name = "recipePicker";
 
-            TextLabelControl hint = UI.Label("Right drag turns the preview", 13);
-            hint.Orientation = Orientation.Center;
-
             ButtonControl work = UI.Button("Work", Work, GuiIcons.Handheld);
             work.Name = "workButton";
 
@@ -156,8 +152,8 @@ namespace ModernVintageGUI.Samples
             RectangleControl middle = UI.Column(
                 UI.Heading("Recipe"),
                 picker,
-                viewer,
-                hint,
+                viewer.Aligned(Orientation.Center),
+                UI.Label("Right drag turns the preview", 13).Aligned(Orientation.Center),
                 UI.Heading("Progress"),
                 progress,
                 UI.Row(work, reset),

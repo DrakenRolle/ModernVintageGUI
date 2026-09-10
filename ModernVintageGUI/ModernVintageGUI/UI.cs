@@ -28,19 +28,10 @@ namespace ModernVintageGUI
     /// </code>
     ///
     /// The helpers return the concrete control, so anything they do not cover - a name, a fixed
-    /// size, an alignment - is assigned to its properties afterwards, the same way it is on a
-    /// control made with <c>new</c>:
-    ///
-    /// <code>
-    /// ButtonControl save = UI.Button("Save", Save);
-    /// save.Name = "saveButton";
-    /// save.Size = new PointD(160, 40);
-    /// save.IsAutoSize = false;
-    /// </code>
-    ///
-    /// The only thing that chains is adding children: <see cref="UIControlExtensions.Add{T}"/>
-    /// hands the child back and <c>AddRange</c> the parent, so a tree can be written as the tree
-    /// it is. Values are never set through a method.
+    /// size, a margin - is assigned to its properties afterwards, the same way it is on a control
+    /// made with <c>new</c>. There is no <c>WithSize</c> or <c>WithName</c>: a value goes through
+    /// its property. What does chain is in <see cref="UIControlExtensions"/> - adding children,
+    /// and the handful of switches like <c>Aligned</c>, <c>Enabled</c> and <c>OnClick</c>.
     /// </summary>
     public static class UI
     {
@@ -355,11 +346,10 @@ namespace ModernVintageGUI
     }
 
     /// <summary>
-    /// Adding children, on every control. <see cref="Add{T}"/> hands the child back and
-    /// <c>AddRange</c> the parent, so a tree can be built in one expression. This is the one
-    /// place a call returns a control to go on with: values are set through properties, not
-    /// through methods, so there is no <c>WithSize</c> or <c>WithName</c> here and there will
-    /// not be.
+    /// Helpers on every control that hand back what they were called on, so a control can be
+    /// configured and put into its parent in one expression. Adding children is the main one;
+    /// the rest are switches. Plain values - a name, a size, a margin - are not here: those are
+    /// assigned to the property.
     /// </summary>
     public static class UIControlExtensions
     {
@@ -422,6 +412,50 @@ namespace ModernVintageGUI
             }
 
             return parent;
+        }
+
+        /// <summary>Back to sizing from the content.</summary>
+        public static T AutoSized<T>(this T control) where T : UIControl
+        {
+            control.IsAutoSize = true;
+            return control;
+        }
+
+        /// <summary>Where the control sits across its parent's stacking direction.</summary>
+        public static T Aligned<T>(this T control, Orientation orientation) where T : UIControl
+        {
+            control.Orientation = orientation;
+            return control;
+        }
+
+        public static T Enabled<T>(this T control, bool enabled) where T : UIControl
+        {
+            control.IsEnabled = enabled;
+            return control;
+        }
+
+        public static T Visible<T>(this T control, bool visible) where T : UIControl
+        {
+            control.IsVisible = visible;
+            return control;
+        }
+
+        /// <summary>Cut what the children draw at the edge of this control.</summary>
+        public static T Clipping<T>(this T control, bool clips = true) where T : UIControl
+        {
+            control.ClipsChildren = clips;
+            return control;
+        }
+
+        /// <summary>Subscribes to <see cref="UIControl.Clicked"/> without the event arguments.</summary>
+        public static T OnClick<T>(this T control, Action handler) where T : UIControl
+        {
+            if (handler != null)
+            {
+                control.Clicked += (sender, e) => handler();
+            }
+
+            return control;
         }
     }
 }

@@ -38,9 +38,8 @@ namespace ModernVintageGUI.Samples
             var settings = new Settings();
             bool dirty = false;
 
-            ButtonControl save = UI.Button("Save", null, GuiIcons.Import);
+            ButtonControl save = UI.Button("Save", null, GuiIcons.Import).Enabled(false);
             save.Name = "saveButton";
-            save.IsEnabled = false;
 
             void Touched()
             {
@@ -120,9 +119,6 @@ namespace ModernVintageGUI.Samples
             ButtonControl cancel = UI.Button("Cancel", () => capi?.ShowChatMessage(dirty ? "Settings: changes dropped" : "Settings: nothing to drop"));
             cancel.Name = "cancelButton";
 
-            RectangleControl buttons = UI.Row(cancel, save);
-            buttons.Orientation = Orientation.Right;
-
             parent.Add(UI.Column(
                 UI.Title("Settings"),
 
@@ -141,7 +137,7 @@ namespace ModernVintageGUI.Samples
                     UI.Row(difficultyLabel, difficulty),
                     UI.Row(nameLabel, playerName)),
 
-                buttons));
+                UI.Row(cancel, save).Aligned(Orientation.Right)));
 
             // The dropdown started on its first entry; the form starts on Normal. Picking it
             // runs the handler above, which marks the form dirty - undone right after, so the

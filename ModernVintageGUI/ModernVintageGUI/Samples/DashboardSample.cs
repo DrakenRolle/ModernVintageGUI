@@ -105,16 +105,14 @@ namespace ModernVintageGUI.Samples
             var picker = new ColorPickerControl(_Name: "mapColor")
             {
                 Size = new PointD(120, 80),
-                IsAutoSize = false,
-                Orientation = Orientation.Center
+                IsAutoSize = false
             };
 
             var map = new PixelCanvasControl(columns: 16, rows: 16, unscaledPixelSize: 8, _Name: "map")
             {
                 DrawMode = true,
                 ShowGrid = true,
-                DrawColor = picker.SelectedColor,
-                Orientation = Orientation.Center
+                DrawColor = picker.SelectedColor
             };
 
             ControlShowcase.PaintHouse(map);
@@ -122,8 +120,8 @@ namespace ModernVintageGUI.Samples
 
             RectangleControl mapPanel = UI.Column(
                 UI.Heading("Map - right drag paints"),
-                map,
-                picker);
+                map.Aligned(Orientation.Center),
+                picker.Aligned(Orientation.Center));
             mapPanel.Name = "mapPanel";
             mapPanel.Padding = 4;
 
@@ -212,13 +210,10 @@ namespace ModernVintageGUI.Samples
             screen.SetFractions(UpperShare, 1 - UpperShare);
             screen.SplitterMoved += (sender, e) => Log("Halves resized");
 
-            TextLabelControl hint = UI.Label("Drag the bars. Switches are in the lower tabs.", 14);
-            hint.Orientation = Orientation.Center;
-
             parent.Add(UI.Row(
                 UI.Title("Factory dashboard"),
                 UI.Spacer(20, 1),
-                hint));
+                UI.Label("Drag the bars. Switches are in the lower tabs.", 14).Aligned(Orientation.Center)));
 
             parent.Add(screen);
 

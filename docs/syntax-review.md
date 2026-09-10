@@ -52,12 +52,12 @@ Four things stand out, and they repeat in every dialog in the repository:
 
 Two additions, both in `ModernVintageGUI/UI.cs`, both optional: nothing existing was renamed or
 moved, and every dialog written before this still compiles unchanged. One rule runs through both:
-**values are assigned through properties, and only adding children chains.** A first draft also
-had `.WithSize(w, h)`, `.WithName(n)`, `.Aligned(...)` and friends - method calls that set a
-property and hand the control back. They were taken out again: a control's state is its
-properties, and a second, fluent spelling of every property is a second API to learn, document
-and keep in step with the first. What is left is the part properties cannot express, which is
-putting a control into a parent.
+**a plain value is assigned to its property.** A first draft also had `.WithSize(w, h)`,
+`.WithName(n)`, `.WithMargin(m)`, `.WithPadding(p)` and `.WithMaxSize(w, h)` - method calls that
+set a property and hand the control back. They were taken out again: a name or a size is a
+property, and a second, fluent spelling of it is a second API to keep in step with the first.
+What stays chainable is adding children and the switches - `Aligned`, `Enabled`, `Visible`,
+`Clipping`, `AutoSized`, `OnClick`.
 
 ### `UI` - factories with the dialog defaults baked in
 
@@ -73,16 +73,19 @@ putting a control into a parent.
 | `UI.Checkbox(text, on, onChanged)` / `UI.TextBox(placeholder, onEnter)` / `UI.Dropdown(...)` / `UI.Progress(value, text)` / `UI.Icon(name)` | the control plus the one handler it usually has |
 | `UI.Spacer(w, h)` | an empty fixed size rectangle |
 
-### `UIControlExtensions` - adding children, on every control
+### `UIControlExtensions` - fluent helpers on every control
 
 | Call | Replaces |
 | --- | --- |
 | `parent.Add(child)` | `parent.Children.Add(child)` - and returns the child, so `var save = column.Add(UI.Button("Save"))` is one line |
 | `parent.AddRange(a, b, c)` | three `Children.Add` calls; returns the parent |
+| `.Aligned(Orientation.Right)` | `Orientation = Orientation.Right` |
+| `.Enabled(bool)` / `.Visible(bool)` / `.Clipping()` / `.AutoSized()` | the property assignment, chainable |
+| `.OnClick(() => ...)` | `Clicked += (sender, e) => ...` |
 
-Both are generic on what they are given, so `column.Add(UI.Button(...))` is still a
-`ButtonControl`. Everything else - a name, a fixed size, an alignment, a margin - is a property
-assignment on the control the helper returned:
+All of them are generic on the receiver, so `UI.Button(...).Aligned(...)` is still a
+`ButtonControl` and can go on to set `IconName`. A name, a fixed size, a margin, a padding or a
+maximum size is not a call: it is a property assignment on the control the helper returned:
 
 ```csharp
 ButtonControl save = UI.Button("Save", Save);
@@ -91,7 +94,7 @@ save.Size = new PointD(160, 40);
 save.IsAutoSize = false;
 ```
 
-A control that needs any of that is therefore made first, in a variable, and put into the tree
+A control that needs any of those is therefore made first, in a variable, and put into the tree
 by name; the tree expression itself stays the list of children it is.
 
 ### The same row, after
@@ -103,7 +106,7 @@ group.Add(UI.Row(
 ```
 
 The five sample windows under `Samples/` are written this way throughout, so they double as the
-worked examples. `ConfirmSample` is two named buttons, an aligned row and one tree expression;
+worked examples. `ConfirmSample` is two named buttons and one tree expression;
 `DashboardSample` is a full screen of nested split panels and tabs and stays around two hundred
 and fifty lines.
 
