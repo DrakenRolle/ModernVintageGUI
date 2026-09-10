@@ -115,8 +115,6 @@ opens and takes the picture, so it cannot show a screen that no longer exists.*
 * XAML editor or custom UI designer
 * More styling options (custom backgrounds, fonts) - font name and size are decided per control
   today, with no theme to change them in one place
-* Text field extras - selecting a range, cut and paste, a blinking caret, and placing the caret
-  with the mouse
 * Edge drag resize window
 * No `MinSize`, no gap between a container's children other than each child's own margin, and no
   grid layout - stacking and overlay are the only two
@@ -268,10 +266,23 @@ A text field takes every key while it is focused, so typing does not trigger the
 Escape still leaves, because a dialog you cannot escape from is a trap:
 
 ```csharp
-var search = new TextInputControl { PlaceholderText = "Search..." };
+var search = new TextInputControl { PlaceholderText = "Search...", MaxLength = 40 };
 search.TextChanged  += (s, text) => Filter(text);
 search.EnterPressed += (s, text) => Submit(text);
 ```
+
+It edits the way a text field anywhere else does. The caret goes where the mouse clicks; a drag,
+a double click or Shift with the arrow keys, Home and End selects; Ctrl with the arrows jumps a
+word; Ctrl+A takes everything; Ctrl+X, Ctrl+C and Ctrl+V go through the game's clipboard, and a
+`CharacterFilter` applies to a paste as it does to typing. Text longer than the box scrolls
+sideways so the caret stays in view, and neither it nor the placeholder is ever drawn outside the
+frame. `CaretPosition`, `SelectionStart`, `SelectionLength` and `SelectedText` say where things
+are; `Select`, `SelectAll`, `InsertText`, `Cut`, `Copy` and `Paste` do from code what the keys do.
+
+The caret blinks without redrawing the dialog: the surface holds the text, and the caret is a two
+pixel texture the per frame pass draws over it on the frames it is on. `CaretBlinks = false` draws
+it solid into the surface instead, which is also what happens wherever there is no per frame pass -
+the layout harness and the documentation pictures.
 
 <h2>Context menus</h2>
 
@@ -702,8 +713,9 @@ you add a control.
 
 On top of the per scenario invariants it checks the rules that are not about one tree: the tab
 order, clipping, scrolling, size caps, the split panel arithmetic (shares, drag, minimum size,
-hidden panels, scale), the pixel canvas, the four cross axis alignments on both axes and at two GUI
-scales, that hiding collapses while disabling does not and that neither can be
+hidden panels, scale), the pixel canvas, the text field (typing, selection, clipboard, the caret
+under the mouse, and that nothing is drawn outside its frame), the four cross axis alignments on
+both axes and at two GUI scales, that hiding collapses while disabling does not and that neither can be
 reached by Tab or by the mouse, and that a layout pass writes no property that would ask for another
 layout pass.
 

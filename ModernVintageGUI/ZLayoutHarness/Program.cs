@@ -99,6 +99,7 @@ namespace LayoutHarness
             CheckSplitPanel(failures);
             CheckPixelCanvasPainting(failures);
             CheckPixelCanvasAreas(failures);
+            CheckTextInput(failures);
 
             Console.WriteLine();
 
@@ -440,6 +441,195 @@ namespace LayoutHarness
             }
 
             Console.WriteLine("  all of them reported as painted by the player");
+        }
+
+        /// <summary>
+        /// The text field: what it shows stays inside its frame, and editing it does what a text
+        /// field anywhere else does - typing, a selection with Shift and the arrows, Ctrl+A,
+        /// the clipboard, a word at a time with Ctrl, and the caret where the mouse clicks.
+        ///
+        /// The frame check exists because of a bug: a placeholder longer than the box used to
+        /// run straight out of it, since the label under it was never cut at the frame.
+        /// </summary>
+        private static void CheckTextInput(List<string> failures)
+        {
+            Console.WriteLine("### text input");
+            Console.WriteLine("Text and placeholder stay inside the box; editing, selection, clipboard and the mouse do what they should.");
+            Console.WriteLine();
+
+            const string Area = "text input";
+            const double FieldWidth = 120;
+            const string Placeholder = "A placeholder far too long for a box this narrow";
+
+            RectangleControl Build(string placeholder, string text, out TextInputControl built)
+            {
+                var tree = new RectangleControl(_Name: "root");
+                tree.InsideOrientation = Orientation.None;
+                tree.Padding = 0;
+                tree.Size = new PointD(320, 60);
+                tree.IsAutoSize = false;
+
+                built = new TextInputControl(_Name: "field", _Size: new PointD(FieldWidth, 30), _Margin: 10)
+                {
+                    PlaceholderText = placeholder,
+                    Text = text,
+                    CaretBlinks = false
+                };
+
+                tree.Children.Add(built);
+                tree.PerformLayout();
+
+                return tree;
+            }
+
+            // The strip right of the field, up to the root's own frame. Compared against the
+            // same tree with nothing in the field rather than against zero, because whatever
+            // the root draws out there is not the field's doing.
+            RectangleControl emptyRoot = Build("", "", out TextInputControl emptyField);
+            RectangleControl placeholderRoot = Build(Placeholder, "", out _);
+            RectangleControl longRoot = Build("", new string('m', 60), out _);
+
+            double right = emptyField.Position.X + emptyField.Size.X;
+            double stripEnd = emptyRoot.Size.X - 4;
+
+            int inkEmpty = CountInkBetween(emptyRoot, right + 1, stripEnd);
+            int inkPlaceholder = CountInkBetween(placeholderRoot, right + 1, stripEnd);
+            int inkLong = CountInkBetween(longRoot, right + 1, stripEnd);
+
+            // The placeholder really is wider than the box, otherwise the check proves nothing.
+            var ruler = new TextLabelControl(text: Placeholder, fontName: GuiStyle.StandardFontName, fontSize: 16);
+            double placeholderWidth = ruler.MeasureNaturalSize().X;
+
+            Check(failures, Area, placeholderWidth > FieldWidth,
+                $"the placeholder measures {placeholderWidth:0} px, wider than the {FieldWidth} px box");
+
+            Check(failures, Area, inkPlaceholder == inkEmpty,
+                $"the placeholder is cut at the frame ({inkPlaceholder} px of ink right of the box, {inkEmpty} with an empty field)");
+
+            Check(failures, Area, inkLong == inkEmpty,
+                $"text longer than the box is cut at the frame ({inkLong} px of ink right of the box, {inkEmpty} with an empty field)");
+
+            RectangleControl root = emptyRoot;
+            TextInputControl field = emptyField;
+
+            // --- Editing. The harness has no game, so the field gets a clipboard of its own.
+            string clipboard = "";
+            field.ReadClipboard = () => clipboard;
+            field.WriteClipboard = text => clipboard = text;
+
+            field.Text = "";
+            Type(field, "hello world");
+            Check(failures, Area, field.Text == "hello world" && field.CaretPosition == 11,
+                "typing appends at the caret");
+
+            for (int i = 0; i < 5; i++)
+                Press(field, GlKeys.Left, shift: true);
+
+            Check(failures, Area, field.SelectedText == "world" && field.CaretPosition == 6,
+                "Shift+Left five times selects the last word");
+
+            Press(field, GlKeys.C, ctrl: true);
+            Check(failures, Area, clipboard == "world" && field.Text == "hello world",
+                "Ctrl+C copies the selection and leaves the text alone");
+
+            Press(field, GlKeys.BackSpace);
+            Check(failures, Area, field.Text == "hello " && !field.HasSelection && field.CaretPosition == 6,
+                "Backspace removes the selection");
+
+            Press(field, GlKeys.V, ctrl: true);
+            Check(failures, Area, field.Text == "hello world" && field.CaretPosition == 11,
+                "Ctrl+V pastes at the caret");
+
+            Press(field, GlKeys.A, ctrl: true);
+            Check(failures, Area, field.SelectionStart == 0 && field.SelectionLength == 11,
+                "Ctrl+A selects everything");
+
+            Type(field, "x");
+            Check(failures, Area, field.Text == "x", "typing replaces the selection");
+
+            Press(field, GlKeys.Home);
+            Press(field, GlKeys.Right, shift: true);
+            Press(field, GlKeys.X, ctrl: true);
+            Check(failures, Area, field.Text == "" && clipboard == "x", "Ctrl+X cuts the selection");
+
+            clipboard = "one\ntwo\r\n";
+            Press(field, GlKeys.V, ctrl: true);
+            Check(failures, Area, field.Text == "one two ", "a pasted line break becomes a space");
+
+            field.Text = "one two three";
+            Press(field, GlKeys.Left, ctrl: true);
+            Press(field, GlKeys.Left, ctrl: true);
+            Check(failures, Area, field.CaretPosition == 4, "Ctrl+Left jumps to the start of the word");
+
+            Press(field, GlKeys.Right, ctrl: true);
+            Check(failures, Area, field.CaretPosition == 8, "Ctrl+Right jumps to the start of the next word");
+
+            Press(field, GlKeys.Left);
+            Check(failures, Area, field.CaretPosition == 7 && !field.HasSelection, "Left moves one character");
+
+            Press(field, GlKeys.Right);
+            Press(field, GlKeys.End, shift: true);
+            Check(failures, Area, field.SelectedText == "three" && field.CaretPosition == 13,
+                "Shift+End selects to the end");
+
+            Press(field, GlKeys.Left);
+            Check(failures, Area, field.CaretPosition == 8 && !field.HasSelection,
+                "Left out of a selection lands at its start");
+
+            field.MaxLength = 5;
+            field.Text = "";
+            Type(field, "abcdefgh");
+            Check(failures, Area, field.Text == "abcde", "MaxLength stops typing");
+            field.MaxLength = 0;
+
+            field.CharacterFilter = c => char.IsDigit(c);
+            field.Text = "";
+            clipboard = "a1b2";
+            Press(field, GlKeys.V, ctrl: true);
+            Check(failures, Area, field.Text == "12", "the character filter applies to a paste");
+            field.CharacterFilter = null;
+
+            // --- The mouse. A press one pixel right of the boundary between b and c lands the
+            //     caret in front of c; a drag to just past d selects cd.
+            field.Text = "abcdef";
+            root.PerformLayout();
+
+            int textLeft = (int)Math.Round(field.Position.X + 6);
+            int y = (int)(field.Position.Y + field.Size.Y / 2);
+            int afterB = textLeft + (int)Math.Ceiling(WidthOf("ab")) + 1;
+            int afterD = textLeft + (int)Math.Ceiling(WidthOf("abcd")) + 1;
+
+            field.InvokeEventMouseDown(new MouseEvent(afterB, y, EnumMouseButton.Left, 0));
+            Check(failures, Area, field.CaretPosition == 2 && !field.HasSelection, "a click puts the caret between the characters it lands between");
+
+            field.InvokeEventMouseMove(new MouseEvent(afterD, y, EnumMouseButton.Left, 0));
+            field.InvokeEventMouseUp(new MouseEvent(afterD, y, EnumMouseButton.Left, 0));
+            Check(failures, Area, field.SelectedText == "cd", "a drag selects what it was dragged over");
+
+            field.InvokeEventMouseDown(new MouseEvent(textLeft + 1, y, EnumMouseButton.Left, 0));
+            field.InvokeEventMouseUp(new MouseEvent(textLeft + 1, y, EnumMouseButton.Left, 0));
+            Check(failures, Area, field.CaretPosition == 0 && !field.HasSelection, "a click at the start drops the selection");
+
+            Console.WriteLine();
+
+            static double WidthOf(string text)
+            {
+                return new TextLabelControl(text: text, fontName: GuiStyle.StandardFontName, fontSize: 16).MeasureNaturalSize().X;
+            }
+        }
+
+        /// <summary>Types a string into a field the way the game delivers it: one KeyPress per character.</summary>
+        private static void Type(TextInputControl field, string text)
+        {
+            foreach (char character in text)
+            {
+                field.InvokeEventKeyPress(new IS2Mod.ControlTypes.Events.KeyEventArgs(GlKeys.A, keyChar: character));
+            }
+        }
+
+        private static void Press(TextInputControl field, GlKeys key, bool shift = false, bool ctrl = false)
+        {
+            field.InvokeEventKeyDown(new IS2Mod.ControlTypes.Events.KeyEventArgs(key, shift: shift, ctrl: ctrl));
         }
 
         /// <summary>
@@ -1654,6 +1844,38 @@ namespace LayoutHarness
         }
 
         /// <summary>Counts pixels with any opacity below a given y.</summary>
+        /// <summary>Renders the tree and counts the pixels with any ink in the columns from <paramref name="fromX"/> to <paramref name="toX"/>.</summary>
+        private static int CountInkBetween(UIControl root, double fromX, double toX)
+        {
+            int width = Math.Max(1, (int)Math.Ceiling(root.Size.X));
+            int height = Math.Max(1, (int)Math.Ceiling(root.Size.Y));
+
+            using (var surface = new ImageSurface(Format.Argb32, width, height))
+            using (var ctx = new Context(surface))
+            {
+                ctx.Antialias = Antialias.Best;
+                root.GenerateRenderData(surface, ctx);
+                surface.Flush();
+
+                byte[] data = surface.Data;
+                int stride = surface.Stride;
+                int firstColumn = Math.Max(0, (int)Math.Ceiling(fromX));
+                int lastColumn = Math.Min(width - 1, (int)Math.Floor(toX));
+                int count = 0;
+
+                for (int row = 0; row < height; row++)
+                {
+                    for (int column = firstColumn; column <= lastColumn; column++)
+                    {
+                        if (data[row * stride + column * 4 + 3] != 0)
+                            count++;
+                    }
+                }
+
+                return count;
+            }
+        }
+
         private static int CountInkBelow(UIControl root, double y)
         {
             int width = Math.Max(1, (int)Math.Ceiling(root.Size.X));

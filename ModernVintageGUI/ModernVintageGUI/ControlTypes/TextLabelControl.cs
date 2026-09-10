@@ -164,7 +164,7 @@ namespace IS2Mod.ControlTypes
         [ThreadStatic]
         private static Context? _measureContext;
 
-        private static Context MeasureContext()
+        internal static Context MeasureContext()
         {
             if (_measureContext != null)
                 return _measureContext;
