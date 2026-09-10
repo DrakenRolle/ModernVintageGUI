@@ -1,7 +1,7 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
-using System;
 using System.Collections.Generic;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -57,24 +57,43 @@ namespace ModernVintageGUI.Samples
             bool autoRepeat = false;
 
             // --- Log, first, because the rest writes into it.
-            RectangleControl log = UI.Scroll(220, 190).WithName("log");
+            var log = new RectangleControl(
+                borderWidth: 2,
+                borderColor: new ElementColor(0.0, 0.0, 0.0, 0.4),
+                _Name: "log",
+                _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top,
+                Size = new PointD(220, 190),
+                IsAutoSize = false,
+                EnableVerticalScrollbar = true
+            };
 
             void Log(string line)
             {
-                log.Children.Add(UI.Label(line, 14).WithName("logLine" + log.Children.Count));
+                log.Children.Add(Label(line, 14, "logLine" + log.Children.Count));
                 log.ScrollTo(0, double.MaxValue);
                 capi?.ShowChatMessage("Workshop: " + line);
             }
 
             // --- The middle: preview, picker, progress, buttons.
-            var viewer = new ShapeViewerControl(_Name: "preview").WithSize(140, 140);
+            var viewer = new ShapeViewerControl(_Name: "preview")
+            {
+                Size = new PointD(140, 140),
+                IsAutoSize = false,
+                Orientation = Orientation.Center
+            };
+
             ShowSomething(capi, viewer);
 
-            ProgressBarControl progress = UI.Progress(0, "Idle")
-                .WithName("progress")
-                .WithSize(200, ProgressBarControl.UnscaledDefaultHeight);
-
-            progress.BarColor = new ElementColor(0.75, 0.45, 0.15, 1.0);
+            var progress = new ProgressBarControl(_Name: "progress")
+            {
+                Value = 0,
+                Text = "Idle",
+                Size = new PointD(200, ProgressBarControl.UnscaledDefaultHeight),
+                IsAutoSize = false,
+                BarColor = new ElementColor(0.75, 0.45, 0.15, 1.0)
+            };
 
             void UpdateProgress()
             {
@@ -113,13 +132,18 @@ namespace ModernVintageGUI.Samples
                 Log("Reset");
             }
 
-            var recipeNames = new string[Recipes.Length];
+            var picker = new DropdownControl(_Name: "recipePicker");
+            var recipeItems = new List<DropdownItem>(Recipes.Length);
 
-            for (int i = 0; i < Recipes.Length; i++)
-                recipeNames[i] = Recipes[i].Name;
+            foreach (Recipe entry in Recipes)
+                recipeItems.Add(new DropdownItem(entry.Name, value: entry.Name));
 
-            DropdownControl picker = UI.Dropdown(pick =>
+            picker.SetItems(recipeItems);
+            picker.Select(0);
+            picker.SelectionChanged += (sender, e) =>
             {
+                string pick = e.Item?.Text ?? "";
+
                 foreach (Recipe candidate in Recipes)
                 {
                     if (candidate.Name == pick)
@@ -129,22 +153,52 @@ namespace ModernVintageGUI.Samples
                 stepsDone = 0;
                 UpdateProgress();
                 Log("Recipe: " + recipe.Name + " (" + recipe.Needs + ")");
-            }, recipeNames).WithName("recipePicker");
+            };
 
-            RectangleControl middle = UI.Column(
-                UI.Heading("Recipe"),
-                picker,
-                viewer.Aligned(Orientation.Center),
-                UI.Label("Right drag turns the preview", 13).Aligned(Orientation.Center),
-                UI.Heading("Progress"),
-                progress,
-                UI.Row(
-                    UI.Button("Work", Work, GuiIcons.Handheld).WithName("workButton"),
-                    UI.Button("Reset", Reset, GuiIcons.Undo).WithName("resetButton")),
-                UI.Checkbox("Repeat automatically", autoRepeat, on => { autoRepeat = on; Log(on ? "Repeat on" : "Repeat off"); })
-                    .WithName("repeat"))
-                .WithName("middle")
-                .WithPadding(4);
+            var middle = new RectangleControl(_Name: "middle", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            middle.Children.Add(Heading("Recipe"));
+            middle.Children.Add(picker);
+            middle.Children.Add(viewer);
+
+            TextLabelControl hint = Label("Right drag turns the preview", 13, "previewHint");
+            hint.Orientation = Orientation.Center;
+            middle.Children.Add(hint);
+
+            middle.Children.Add(Heading("Progress"));
+            middle.Children.Add(progress);
+
+            var actions = new RectangleControl(_Name: "actions", _Margin: 0, _Padding: 0)
+            {
+                InsideOrientation = Orientation.Left
+            };
+
+            var work = new ButtonControl(_Name: "workButton")
+            {
+                Text = "Work",
+                IconName = GuiIcons.Handheld
+            };
+
+            work.Clicked += (sender, e) => Work();
+            actions.Children.Add(work);
+
+            var reset = new ButtonControl(_Name: "resetButton")
+            {
+                Text = "Reset",
+                IconName = GuiIcons.Undo
+            };
+
+            reset.Clicked += (sender, e) => Reset();
+            actions.Children.Add(reset);
+
+            middle.Children.Add(actions);
+
+            var repeat = new CheckboxControl("Repeat automatically", isChecked: autoRepeat, _Name: "repeat");
+            repeat.CheckedChanged += (sender, on) => { autoRepeat = on; Log(on ? "Repeat on" : "Repeat off"); };
+            middle.Children.Add(repeat);
 
             // --- The left: slots.
             var input = new InventoryGridControl(columns: 3, _Name: "inputSlots");
@@ -156,18 +210,25 @@ namespace ModernVintageGUI.Samples
             var output = new InventoryGridControl(columns: 2, _Name: "outputSlots");
             output.SetSlotCount(2);
 
-            RectangleControl left = UI.Column(
-                UI.Heading("Input"),
-                input,
-                UI.Heading("Fuel"),
-                fuel,
-                UI.Heading("Output"),
-                output)
-                .WithName("left")
-                .WithPadding(4);
+            var left = new RectangleControl(_Name: "left", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            left.Children.Add(Heading("Input"));
+            left.Children.Add(input);
+            left.Children.Add(Heading("Fuel"));
+            left.Children.Add(fuel);
+            left.Children.Add(Heading("Output"));
+            left.Children.Add(output);
 
             // --- The right: the recipe book and the log, as tabs.
-            var book = new ListViewControl(_Name: "recipeBook").WithSize(220, 190);
+            var book = new ListViewControl(_Name: "recipeBook")
+            {
+                Size = new PointD(220, 190),
+                IsAutoSize = false
+            };
+
             var rows = new List<ListViewItem>();
 
             foreach (Recipe entry in Recipes)
@@ -192,15 +253,38 @@ namespace ModernVintageGUI.Samples
                     picker.SelectByValue(name);
             };
 
-            RectangleControl right = UI.Column(
-                UI.Tabs(
-                    ("Recipes", book),
-                    ("Log", log)))
-                .WithName("right")
-                .WithPadding(4);
+            var tabs = new TabsControl(_Name: "tabs");
+            tabs.AddTab("Recipes", book);
+            tabs.AddTab("Log", log);
 
-            parent.Add(UI.Title("Workshop"));
-            parent.Add(UI.Row(left, middle, right).WithName("body"));
+            var right = new RectangleControl(_Name: "right", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            right.Children.Add(tabs);
+
+            // --- The screen: a title over the three columns.
+            parent.Children.Add(new TextLabelControl(
+                text: "Workshop",
+                fontName: GuiStyle.StandardFontName,
+                fontSize: 22,
+                fontWeight: FontWeight.Bold,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft)
+            {
+                Margin = 4
+            });
+
+            var body = new RectangleControl(_Name: "body", _Margin: 0, _Padding: 0)
+            {
+                InsideOrientation = Orientation.Left
+            };
+
+            body.Children.Add(left);
+            body.Children.Add(middle);
+            body.Children.Add(right);
+            parent.Children.Add(body);
 
             UpdateProgress();
             Log("Station ready. Pick a recipe and press Work.");
@@ -224,6 +308,34 @@ namespace ModernVintageGUI.Samples
                 viewer.ShowBlock(block);
                 return;
             }
+        }
+
+        private static TextLabelControl Heading(string text)
+        {
+            return new TextLabelControl(
+                text: text,
+                fontName: GuiStyle.StandardFontName,
+                fontSize: (int)GuiStyle.SmallFontSize,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft,
+                _Name: "heading_" + text)
+            {
+                Margin = 4
+            };
+        }
+
+        private static TextLabelControl Label(string text, int fontSize, string name)
+        {
+            return new TextLabelControl(
+                text: text,
+                fontName: GuiStyle.StandardFontName,
+                fontSize: fontSize,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft,
+                _Name: name)
+            {
+                Margin = 2
+            };
         }
     }
 }

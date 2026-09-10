@@ -130,6 +130,24 @@ namespace ModernVintageGUI.ControlTypes
         }
 
         #region Layout
+        /// <summary>
+        /// Whether the caption shrinks to fit a bar too small for it. Off by default, and then
+        /// the bar is never narrower or lower than its caption - see
+        /// <see cref="TextLabelControl.TextAutoSize"/>.
+        /// </summary>
+        public bool TextAutoSize
+        {
+            get => _label.TextAutoSize;
+            set
+            {
+                if (_label.TextAutoSize == value)
+                    return;
+
+                _label.TextAutoSize = value;
+                InvalidateLayout();
+            }
+        }
+
         public override PointD CalculateSize()
         {
             foreach (UIControl child in Children)
@@ -137,9 +155,19 @@ namespace ModernVintageGUI.ControlTypes
                 child.CalculateSize();
             }
 
-            PointD measured = ClampToMaxSize(IsAutoSize
+            PointD box = IsAutoSize
                 ? new PointD(UnscaledDefaultWidth * LayoutScale, UnscaledDefaultHeight * LayoutScale)
-                : ScaledExplicitSize);
+                : ScaledExplicitSize;
+
+            // Off by default, the bar is never smaller than its caption; with TextAutoSize on
+            // the caption gives way instead.
+            if (!TextAutoSize && !string.IsNullOrEmpty(_label.Text))
+            {
+                PointD needed = _label.MeasureNaturalSize();
+                box = new PointD(System.Math.Max(box.X, needed.X), System.Math.Max(box.Y, needed.Y));
+            }
+
+            PointD measured = ClampToMaxSize(box);
 
             CalculatedSize = measured;
             SetLayoutSize(measured);

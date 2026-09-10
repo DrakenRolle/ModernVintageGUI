@@ -287,6 +287,16 @@ namespace LayoutHarness
 
             yield return new Scenario
             {
+                Name = "text-fit",
+                Description = "Text that does not fit its box. The left column was given boxes too " +
+                              "small for the text and grew to it; the right column has TextAutoSize, " +
+                              "so the boxes stay and the text shrinks - the wrapped one until its " +
+                              "lines fit.",
+                Build = BuildTextFit
+            };
+
+            yield return new Scenario
+            {
                 Name = "sample-dashboard",
                 Description = "Sample window 5: nested split panels both ways, stats, a painted " +
                               "map, a machine tree and tabs.",
@@ -1128,6 +1138,84 @@ namespace LayoutHarness
             root.Padding = 10;
 
             build(root, null);
+
+            return root;
+        }
+
+        /// <summary>
+        /// Two columns of the same three controls in boxes too small for their text: a button, a
+        /// label and a wrapped label. Left they grow to the text, right they keep the box and
+        /// shrink the text.
+        /// </summary>
+        private static RectangleControl BuildTextFit()
+        {
+            RectangleControl root = CreateRoot();
+            root.InsideOrientation = Orientation.Left;
+
+            foreach (bool shrink in new[] { false, true })
+            {
+                string side = shrink ? "shrinks" : "grows";
+
+                var column = new RectangleControl(_Name: side)
+                {
+                    InsideOrientation = Orientation.Top,
+                    Padding = 6
+                };
+
+                var button = new ButtonControl(_Name: side + "Button")
+                {
+                    Text = shrink ? "Shrinks its caption" : "Grows to fit its caption",
+                    Size = new PointD(90, 30),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left,
+                    TextAutoSize = shrink
+                };
+
+                column.Children.Add(button);
+
+                // The labels sit in a bordered box each, so the picture shows the box and not
+                // only the text.
+                var labelBox = new RectangleControl(borderWidth: 1, _Name: side + "LabelBox")
+                {
+                    InsideOrientation = Orientation.Top,
+                    Orientation = Orientation.Left
+                };
+
+                labelBox.Children.Add(new TextLabelControl(
+                    text: shrink ? "Shrinks its text" : "Grows to fit its text",
+                    fontSize: 16,
+                    _Name: side + "Label")
+                {
+                    Size = new PointD(90, 20),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left,
+                    TextAutoSize = shrink
+                });
+
+                column.Children.Add(labelBox);
+
+                var wrappedBox = new RectangleControl(borderWidth: 1, _Name: side + "WrappedBox")
+                {
+                    InsideOrientation = Orientation.Top,
+                    Orientation = Orientation.Left
+                };
+
+                wrappedBox.Children.Add(new TextLabelControl(
+                    text: "Wrapped text with more lines than the box has room for at the nominal size",
+                    fontSize: 16,
+                    wordWrap: true,
+                    lineHeight: 20,
+                    _Name: side + "Wrapped")
+                {
+                    Size = new PointD(140, 44),
+                    IsAutoSize = false,
+                    Orientation = Orientation.Left,
+                    TextAutoSize = shrink
+                });
+
+                column.Children.Add(wrappedBox);
+                root.Children.Add(column);
+            }
 
             return root;
         }

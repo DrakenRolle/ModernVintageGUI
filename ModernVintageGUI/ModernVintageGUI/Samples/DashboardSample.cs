@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
@@ -36,19 +37,19 @@ namespace ModernVintageGUI.Samples
             var random = new Random(12345);
 
             // --- Log and alerts, first, because the rest writes into them.
-            RectangleControl log = UI.Scroll(Width - 40, 110).WithName("log");
-            RectangleControl alerts = UI.Scroll(Width - 40, 110).WithName("alerts");
+            RectangleControl log = ScrollBox("log", Width - 40, 110);
+            RectangleControl alerts = ScrollBox("alerts", Width - 40, 110);
 
             void Log(string line)
             {
-                log.Children.Add(UI.Label(line, 14).WithName("logLine" + log.Children.Count));
+                log.Children.Add(Label(line, 14, "logLine" + log.Children.Count));
                 log.ScrollTo(0, double.MaxValue);
                 capi?.ShowChatMessage("Dashboard: " + line);
             }
 
             void Alert(string line)
             {
-                alerts.Children.Add(UI.Label("! " + line, 14).WithName("alertLine" + alerts.Children.Count));
+                alerts.Children.Add(Label("! " + line, 14, "alertLine" + alerts.Children.Count));
                 alerts.ScrollTo(0, double.MaxValue);
                 Log("Alert: " + line);
             }
@@ -58,16 +59,25 @@ namespace ModernVintageGUI.Samples
             string[] names = { "Power", "Ore", "Charcoal", "Water" };
             double[] values = { 0.82, 0.35, 0.60, 0.15 };
 
-            RectangleControl stats = UI.Column(UI.Heading("Production")).WithName("stats").WithPadding(4);
+            var stats = new RectangleControl(_Name: "stats", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            stats.Children.Add(Heading("Production"));
 
             for (int i = 0; i < bars.Length; i++)
             {
-                bars[i] = UI.Progress(values[i], names[i] + "  " + (int)(values[i] * 100) + "%")
-                    .WithName("stat_" + names[i])
-                    .WithSize(180, ProgressBarControl.UnscaledDefaultHeight);
+                bars[i] = new ProgressBarControl(_Name: "stat_" + names[i])
+                {
+                    Value = values[i],
+                    Text = names[i] + "  " + (int)(values[i] * 100) + "%",
+                    Size = new PointD(180, ProgressBarControl.UnscaledDefaultHeight),
+                    IsAutoSize = false,
+                    BarColor = BarColorFor(values[i])
+                };
 
-                bars[i].BarColor = BarColorFor(values[i]);
-                stats.Add(bars[i]);
+                stats.Children.Add(bars[i]);
             }
 
             void Tick()
@@ -86,30 +96,48 @@ namespace ModernVintageGUI.Samples
                 Log("Tick");
             }
 
-            stats.Add(UI.Button("Simulate a tick", Tick, GuiIcons.Repeat).WithName("tickButton"));
+            var tick = new ButtonControl(_Name: "tickButton")
+            {
+                Text = "Simulate a tick",
+                IconName = GuiIcons.Repeat
+            };
+
+            tick.Clicked += (sender, e) => Tick();
+            stats.Children.Add(tick);
 
             // --- Map: a canvas the player paints on with the picked colour.
-            var picker = new ColorPickerControl(_Name: "mapColor").WithSize(120, 80);
+            var picker = new ColorPickerControl(_Name: "mapColor")
+            {
+                Size = new PointD(120, 80),
+                IsAutoSize = false,
+                Orientation = Orientation.Center
+            };
 
             var map = new PixelCanvasControl(columns: 16, rows: 16, unscaledPixelSize: 8, _Name: "map")
             {
                 DrawMode = true,
                 ShowGrid = true,
-                DrawColor = picker.SelectedColor
+                DrawColor = picker.SelectedColor,
+                Orientation = Orientation.Center
             };
 
             ControlShowcase.PaintHouse(map);
             picker.ColorChanged += (sender, color) => map.DrawColor = color;
 
-            RectangleControl mapPanel = UI.Column(
-                UI.Heading("Map - right drag paints"),
-                map.Aligned(Orientation.Center),
-                picker.Aligned(Orientation.Center))
-                .WithName("mapPanel")
-                .WithPadding(4);
+            var mapPanel = new RectangleControl(_Name: "mapPanel", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            mapPanel.Children.Add(Heading("Map - right drag paints"));
+            mapPanel.Children.Add(map);
+            mapPanel.Children.Add(picker);
 
             // --- Machines: a tree, with one node per machine and its parts under it.
-            var machines = new TreeViewControl(_Name: "machines").WithSize(180, 240);
+            var machines = new TreeViewControl(_Name: "machines")
+            {
+                IsAutoSize = true
+            };
 
             foreach (string machine in Machines)
             {
@@ -122,69 +150,131 @@ namespace ModernVintageGUI.Samples
             machines.Nodes[0].Expand();
             machines.SelectionChanged += (sender, e) => Log("Machine: " + (e.Value ?? "none"));
 
-            RectangleControl machinePanel = UI.Column(UI.Heading("Machines"), machines)
-                .WithName("machinePanel")
-                .WithPadding(4);
+            var machinePanel = new RectangleControl(_Name: "machinePanel", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
 
-            // --- The upper half: three panels.
-            SplitPanelControl upper = UI.Split(Orientation.Left, stats, mapPanel, machinePanel)
-                .WithName("upper")
-                // A little under the panel it sits in: its own margin on each side, and the bar.
-                .WithSize(Width - 10, Height * UpperShare - 20);
+            machinePanel.Children.Add(Heading("Machines"));
+            machinePanel.Children.Add(machines);
 
+            // --- The upper half: three panels. A little under the panel it sits in: its own
+            // margin on each side, and the bar.
+            var upper = new SplitPanelControl(panelCount: 3, Orientation.Left, _Name: "upper")
+            {
+            };
+
+            upper.Panels[0].Children.Add(stats);
+            upper.Panels[1].Children.Add(mapPanel);
+            upper.Panels[2].Children.Add(machinePanel);
             upper.SetFractions(0.30, 0.38, 0.32);
 
             // --- The lower half: tabs. The switches act on the upper half.
-            RectangleControl switches = UI.Column(
-                UI.Checkbox("Show map", true, on =>
-                {
-                    // The panel goes, and its bar with it; the other two share its room.
-                    upper.Panels[1].IsVisible = on;
-                    Log(on ? "Map shown" : "Map hidden");
-                }).WithName("showMap"),
+            var switches = new RectangleControl(_Name: "switches", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
 
-                UI.Checkbox("Freeze the upper half", false, on =>
-                {
-                    upper.IsEnabled = !on;
-                    Log(on ? "Upper half frozen" : "Upper half live");
-                }).WithName("freeze"),
+            var showMap = new CheckboxControl("Show map", isChecked: true, _Name: "showMap");
+            showMap.CheckedChanged += (sender, on) =>
+            {
+                // The panel goes, and its bar with it; the other two share its room.
+                upper.Panels[1].IsVisible = on;
+                Log(on ? "Map shown" : "Map hidden");
+            };
+            switches.Children.Add(showMap);
 
-                UI.Checkbox("Lock the bars", false, on =>
-                {
-                    upper.IsResizable = !on;
-                    Log(on ? "Bars locked" : "Bars unlocked");
-                }).WithName("lockBars"),
+            var freeze = new CheckboxControl("Freeze the upper half", isChecked: false, _Name: "freeze");
+            freeze.CheckedChanged += (sender, on) =>
+            {
+                upper.IsEnabled = !on;
+                Log(on ? "Upper half frozen" : "Upper half live");
+            };
+            switches.Children.Add(freeze);
 
-                UI.Row(
-                    UI.Button("Equal panels", () => { upper.SetFractions(1, 1, 1); Log("Panels equalised"); })
-                        .WithName("equalise"),
-                    UI.Button("Clear log", () => { log.Children.Clear(); alerts.Children.Clear(); })
-                        .WithName("clearLog")))
-                .WithName("switches")
-                .WithPadding(4);
+            var lockBars = new CheckboxControl("Lock the bars", isChecked: false, _Name: "lockBars");
+            lockBars.CheckedChanged += (sender, on) =>
+            {
+                upper.IsResizable = !on;
+                Log(on ? "Bars locked" : "Bars unlocked");
+            };
+            switches.Children.Add(lockBars);
 
-            RectangleControl lower = UI.Column(
-                UI.Tabs(
-                    ("Log", log),
-                    ("Alerts", alerts),
-                    ("Switches", switches)))
-                .WithName("lower")
-                .WithPadding(4);
+            var switchButtons = new RectangleControl(_Name: "switchButtons", _Margin: 0, _Padding: 0)
+            {
+                InsideOrientation = Orientation.Left
+            };
+
+            var equalise = new ButtonControl(_Name: "equalise")
+            {
+                Text = "Equal panels"
+            };
+
+            equalise.Clicked += (sender, e) => { upper.SetFractions(1, 1, 1); Log("Panels equalised"); };
+            switchButtons.Children.Add(equalise);
+
+            var clearLog = new ButtonControl(_Name: "clearLog")
+            {
+                Text = "Clear log"
+            };
+
+            clearLog.Clicked += (sender, e) => { log.Children.Clear(); alerts.Children.Clear(); };
+            switchButtons.Children.Add(clearLog);
+
+            switches.Children.Add(switchButtons);
+
+            var tabs = new TabsControl(_Name: "lowerTabs");
+            tabs.AddTab("Log", log);
+            tabs.AddTab("Alerts", alerts);
+            tabs.AddTab("Switches", switches);
+
+            var lower = new RectangleControl(_Name: "lower", _Margin: 0, _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            lower.Children.Add(tabs);
 
             // --- The whole screen: upper over lower, a bar between them.
-            SplitPanelControl screen = UI.Split(Orientation.Top, upper, lower)
-                .WithName("screen")
-                .WithSize(Width, Height);
+            var screen = new SplitPanelControl(panelCount: 2, Orientation.Top, _Name: "screen")
+            {
+                Size = new PointD(Width, Height)
+            };
 
-            screen.SetFractions(UpperShare, 1 - UpperShare);
+            screen.Panels[0].Children.Add(upper);
+            screen.Panels[1].Children.Add(lower);
+            //screen.SetFractions(UpperShare, 1 - UpperShare);
             screen.SplitterMoved += (sender, e) => Log("Halves resized");
 
-            parent.Add(UI.Row(
-                UI.Title("Factory dashboard"),
-                UI.Spacer(20, 1),
-                UI.Label("Drag the bars. Switches are in the lower tabs.", 14).Aligned(Orientation.Center)));
+            // --- The title line.
+            var titleRow = new RectangleControl(_Name: "titleRow", _Margin: 0, _Padding: 0)
+            {
+                InsideOrientation = Orientation.Left
+            };
 
-            parent.Add(screen);
+            titleRow.Children.Add(new TextLabelControl(
+                text: "Factory dashboard",
+                fontName: GuiStyle.StandardFontName,
+                fontSize: 22,
+                fontWeight: FontWeight.Bold,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft)
+            {
+                Margin = 4
+            });
+
+            titleRow.Children.Add(new RectangleControl(borderWidth: 0, _Name: "titleGap", _Margin: 0, _Padding: 0)
+            {
+                Size = new PointD(20, 1),
+                IsAutoSize = false
+            });
+
+            TextLabelControl hint = Label("Drag the bars. Switches are in the lower tabs.", 14, "hint");
+            hint.Orientation = Orientation.Center;
+            titleRow.Children.Add(hint);
+
+            parent.Children.Add(titleRow);
+            parent.Children.Add(screen);
 
             Alert("Water is low");
             Log("Dashboard ready");
@@ -200,6 +290,50 @@ namespace ModernVintageGUI.Samples
                 return new ElementColor(0.75, 0.55, 0.15, 1.0);
 
             return new ElementColor(0.25, 0.55, 0.20, 1.0);
+        }
+
+        /// <summary>A framed, fixed size column that scrolls when its lines do not fit.</summary>
+        private static RectangleControl ScrollBox(string name, double width, double height)
+        {
+            return new RectangleControl(
+                borderWidth: 2,
+                borderColor: new ElementColor(0.0, 0.0, 0.0, 0.4),
+                _Name: name,
+                _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top,
+                Size = new PointD(width, height),
+                IsAutoSize = false,
+                EnableVerticalScrollbar = true
+            };
+        }
+
+        private static TextLabelControl Heading(string text)
+        {
+            return new TextLabelControl(
+                text: text,
+                fontName: GuiStyle.StandardFontName,
+                fontSize: (int)GuiStyle.SmallFontSize,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft,
+                _Name: "heading_" + text)
+            {
+                Margin = 4
+            };
+        }
+
+        private static TextLabelControl Label(string text, int fontSize, string name)
+        {
+            return new TextLabelControl(
+                text: text,
+                fontName: GuiStyle.StandardFontName,
+                fontSize: fontSize,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft,
+                _Name: name)
+            {
+                Margin = 2
+            };
         }
     }
 }

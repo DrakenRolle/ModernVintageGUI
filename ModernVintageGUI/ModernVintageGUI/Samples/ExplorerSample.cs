@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.Enums;
 using ModernVintageGUI.ControlTypes;
@@ -11,8 +12,8 @@ namespace ModernVintageGUI.Samples
     ///
     /// Three panels side by side - categories as a tree, the entries of the picked category as
     /// a list, and the picked entry's details - and under all of that a log, with a horizontal
-    /// bar between the two halves. Every bar can be dragged; the panels clip whatever no longer
-    /// fits rather than reflowing it.
+    /// bar between the two halves. Every bar can be dragged; a panel dragged too small for its
+    /// content grows a scrollbar rather than reflowing it.
     ///
     /// The wiring is the everyday kind: the tree fills the list, the list fills the detail view
     /// (in <see cref="ListViewDetailMode.Attached"/>, so the panel stands still while the list is
@@ -74,12 +75,21 @@ namespace ModernVintageGUI.Samples
             parent.InsideOrientation = Orientation.Top;
 
             // The log first, because everything else writes into it.
-            RectangleControl log = UI.Scroll(Width - 20, 70).WithName("log");
-            log.Padding = 4;
+            var log = new RectangleControl(
+                borderWidth: 2,
+                borderColor: new ElementColor(0.0, 0.0, 0.0, 0.4),
+                _Name: "log",
+                _Padding: 4)
+            {
+                InsideOrientation = Orientation.Top,
+                Size = new PointD(Width - 20, 70),
+                IsAutoSize = false,
+                EnableVerticalScrollbar = true
+            };
 
             void Log(string line)
             {
-                log.Children.Add(UI.Label(line, 14).WithName("logLine" + log.Children.Count));
+                log.Children.Add(Label(line, 14, "logLine" + log.Children.Count));
 
                 // The newest line at the bottom, where the eye is.
                 log.ScrollTo(0, double.MaxValue);
@@ -89,13 +99,22 @@ namespace ModernVintageGUI.Samples
             // Details on the right. Attached mode: the list fills it, this code places it.
             var list = new ListViewControl(_Name: "entries")
             {
-                DetailMode = ListViewDetailMode.Attached
-            }.WithSize(200, 280);
+                DetailMode = ListViewDetailMode.Attached,
+                Size = new PointD(200, 280),
+                IsAutoSize = false
+            };
 
-            DetailViewControl details = list.DetailView.WithSize(200, 280).WithName("details");
+            DetailViewControl details = list.DetailView;
+            details.Name = "details";
+            details.Size = new PointD(200, 280);
+            details.IsAutoSize = false;
 
             // Categories on the left.
-            var tree = new TreeViewControl(_Name: "categories").WithSize(150, 280);
+            var tree = new TreeViewControl(_Name: "categories")
+            {
+                Size = new PointD(150, 280),
+                IsAutoSize = false
+            };
 
             TreeNode materials = tree.AddNode("Materials", iconName: GuiIcons.Basket);
             materials.Add("Rock", "rock", GuiIcons.Erode);
@@ -130,31 +149,50 @@ namespace ModernVintageGUI.Samples
                     Log("Picked " + e.Item.Text);
             };
 
-            // The browser: three panels, the middle one widest.
-            SplitPanelControl browser = UI.Split(
-                    Orientation.Left,
-                    tree,
-                    list,
-                    details)
-                .WithName("browser")
-                // A little under the panel it sits in: its own margin on each side, and the bar.
-                .WithSize(Width - 10, Height * BrowserShare - 20);
+            // The browser: three panels, the middle one widest. A little under the panel it sits
+            // in: its own margin on each side, and the bar.
+            var browser = new SplitPanelControl(panelCount: 3, Orientation.Left, _Name: "browser")
+            {
+                Size = new PointD(Width - 10, Height * BrowserShare - 20)
+            };
 
+            browser.Panels[0].Children.Add(tree);
+            browser.Panels[1].Children.Add(list);
+            browser.Panels[2].Children.Add(details);
             browser.SetFractions(0.25, 0.40, 0.35);
             browser.SplitterMoved += (sender, e) => Log("Browser bar " + e.SplitterIndex + " moved");
 
-            // And the whole screen: the browser over the log, with a horizontal bar between.
-            SplitPanelControl screen = UI.Split(
-                    Orientation.Top,
-                    browser,
-                    UI.Column(UI.Heading("Log"), log))
-                .WithName("screen")
-                .WithSize(Width, Height);
+            // The lower half: a heading over the log.
+            var logColumn = new RectangleControl(_Name: "logColumn", _Margin: 0, _Padding: 0)
+            {
+                InsideOrientation = Orientation.Top
+            };
 
+            logColumn.Children.Add(Heading("Log"));
+            logColumn.Children.Add(log);
+
+            // And the whole screen: the browser over the log, with a horizontal bar between.
+            var screen = new SplitPanelControl(panelCount: 2, Orientation.Top, _Name: "screen")
+            {
+                Size = new PointD(Width, Height)
+            };
+
+            screen.Panels[0].Children.Add(browser);
+            screen.Panels[1].Children.Add(logColumn);
             screen.SetFractions(BrowserShare, 1 - BrowserShare);
 
-            parent.Add(UI.Title("Material explorer"));
-            parent.Add(screen);
+            parent.Children.Add(new TextLabelControl(
+                text: "Material explorer",
+                fontName: GuiStyle.StandardFontName,
+                fontSize: 22,
+                fontWeight: FontWeight.Bold,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft)
+            {
+                Margin = 4
+            });
+
+            parent.Children.Add(screen);
 
             // Something showing from the start, so the picture - and the first look in game -
             // is a filled screen rather than three empty boxes.
@@ -180,6 +218,34 @@ namespace ModernVintageGUI.Samples
                     }
                 };
             }
+        }
+
+        private static TextLabelControl Heading(string text)
+        {
+            return new TextLabelControl(
+                text: text,
+                fontName: GuiStyle.StandardFontName,
+                fontSize: (int)GuiStyle.SmallFontSize,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft,
+                _Name: "heading_" + text)
+            {
+                Margin = 4
+            };
+        }
+
+        private static TextLabelControl Label(string text, int fontSize, string name)
+        {
+            return new TextLabelControl(
+                text: text,
+                fontName: GuiStyle.StandardFontName,
+                fontSize: fontSize,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft,
+                _Name: name)
+            {
+                Margin = 2
+            };
         }
     }
 }

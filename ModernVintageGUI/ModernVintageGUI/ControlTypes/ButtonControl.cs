@@ -297,6 +297,52 @@ namespace IS2Mod.ControlTypes
         {
             return control.ContainsLocalPoint(localX, localY) ? control : null;
         }
+        /// <summary>
+        /// Air either side of the caption, in author units, on top of the label's own padding.
+        /// Without it a caption ran from bevel to bevel.
+        /// </summary>
+        public const double UnscaledCaptionInset = 8.0;
+
+        /// <summary>
+        /// Whether the caption shrinks to fit a button that was given a <see cref="UIControl.Size"/>
+        /// too small for it. Off by default, and then the button is never smaller than its caption
+        /// and icon - see <see cref="TextLabelControl.TextAutoSize"/>.
+        /// </summary>
+        public bool TextAutoSize
+        {
+            get => _textLabel.TextAutoSize;
+            set
+            {
+                if (_textLabel.TextAutoSize == value)
+                    return;
+
+                _textLabel.TextAutoSize = value;
+                InvalidateLayout();
+            }
+        }
+
+        private double CaptionInset()
+        {
+            return string.IsNullOrEmpty(Text) ? 0 : UnscaledCaptionInset * LayoutScale;
+        }
+
+        /// <summary>The icon at a given button height, without looking at the current size.</summary>
+        private double IconSizeFor(double height)
+        {
+            double requested = UnscaledIconSize > 0 ? UnscaledIconSize * LayoutScale : height * IconHeightFraction;
+
+            return Math.Max(0, Math.Min(requested, height));
+        }
+
+        /// <summary>The room the caption and the icon need together, at a given button height.</summary>
+        private PointD ContentSize(double height)
+        {
+            PointD caption = _textLabel.MeasureNaturalSize();
+            double icon = HasIcon ? IconSizeFor(height) : 0;
+
+            return new PointD(caption.X + icon + IconGap() + CaptionInset() * 2, caption.Y);
+        }
+
         public override PointD CalculateSize()
         {
             if(IsAutoSize == false)
@@ -305,7 +351,18 @@ namespace IS2Mod.ControlTypes
                 // pixels, like every other authored dimension. CalculatedSize has to be kept in
                 // sync: CalculateClippedSize uses it to decide whether the control overflows its
                 // parent, and a stale 0 there makes that check meaningless.
-                CalculatedSize = ClampToMaxSize(ScaledExplicitSize);
+                PointD box = ScaledExplicitSize;
+
+                // Off by default, the button is never smaller than its caption and icon: a size
+                // too small for them is raised to what they need. With TextAutoSize on the box
+                // stays as told and the caption gives way instead.
+                if (!TextAutoSize)
+                {
+                    PointD needed = ContentSize(box.Y);
+                    box = new PointD(Math.Max(box.X, needed.X), Math.Max(box.Y, needed.Y));
+                }
+
+                CalculatedSize = ClampToMaxSize(box);
                 SetLayoutSize(CalculatedSize);
                 return CalculatedSize;
             }
@@ -313,9 +370,10 @@ namespace IS2Mod.ControlTypes
             PointD size = base.CalculateSize();
 
             // An auto sizing button has to be wide enough for its caption *and* its icon, or
-            // the icon eats into the text it was put next to.
-            // Room for the icon and the gap next to the caption the base already measured.
-            double extra = (HasIcon ? IconSize() : 0) + IconGap();
+            // the icon eats into the text it was put next to - and for the air either side of
+            // the caption. Room for the icon and the gap next to the caption the base already
+            // measured.
+            double extra = (HasIcon ? IconSize() : 0) + IconGap() + CaptionInset() * 2;
 
             if (extra > 0)
             {
@@ -381,6 +439,13 @@ namespace IS2Mod.ControlTypes
             double textWidth = string.IsNullOrEmpty(Text) ? 0 : _textLabel.MeasureNaturalSize().X;
 
             _textLabel.SetLayoutSize(Size);
+
+            // A caption that TextAutoSize shrank is narrower than it measures, and the block
+            // is centred on what is drawn. After the label has its box, because the fit
+            // depends on it.
+            if (_textLabel.TextAutoSize && _textLabel.FontSize > 0)
+                textWidth = Math.Min(textWidth, textWidth * _textLabel.EffectiveFontSize / _textLabel.FontSize);
+
             _textLabel.Position = new PointD(Position.X + block / 2.0, Position.Y);
 
             _iconLeft = Position.X + Math.Max(0, (Size.X - (block + textWidth)) / 2.0);

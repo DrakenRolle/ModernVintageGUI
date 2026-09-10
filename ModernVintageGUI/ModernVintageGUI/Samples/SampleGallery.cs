@@ -1,3 +1,4 @@
+using Cairo;
 using IS2Mod.ControlTypes;
 using IS2Mod.ControlTypes.Custom;
 using IS2Mod.Enums;
@@ -125,22 +126,67 @@ namespace ModernVintageGUI.Samples
             parent.InsideOrientation = Orientation.Top;
             parent.Padding = 10;
 
-            parent.Add(UI.Title("Sample windows"));
-            parent.Add(UI.Label("Five screens of rising complexity. Each opens as its own dialog.", 14));
+            parent.Children.Add(new TextLabelControl(
+                text: "Sample windows",
+                fontName: GuiStyle.StandardFontName,
+                fontSize: 22,
+                fontWeight: FontWeight.Bold,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft)
+            {
+                Margin = 4
+            });
+
+            parent.Children.Add(new TextLabelControl(
+                text: "Five screens of rising complexity. Each opens as its own dialog.",
+                fontName: GuiStyle.StandardFontName,
+                fontSize: 14,
+                textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                orientation: TextOrientation.MiddleLeft)
+            {
+                Margin = 2
+            });
 
             foreach (SampleWindow sample in All)
             {
                 SampleWindow captured = sample;
 
-                RectangleControl row = UI.Row(
-                    UI.Button(
-                            captured.Complexity + "  " + captured.Title,
-                            open == null ? null : () => open(captured))
-                        .WithSize(150, 34)
-                        .WithName("open_" + captured.Id),
-                    UI.Paragraph(captured.Description, 330, 14).WithMargin(6));
+                var row = new RectangleControl(_Name: "row_" + captured.Id, _Margin: 0, _Padding: 0)
+                {
+                    InsideOrientation = Orientation.Left
+                };
 
-                parent.Add(row);
+                var button = new ButtonControl(_Name: "open_" + captured.Id)
+                {
+                    Text = captured.Complexity + "  " + captured.Title,
+                    Size = new PointD(180, 34),
+                    IsAutoSize = false
+                };
+
+                if (open != null)
+                {
+                    button.Clicked += (sender, e) => open(captured);
+                }
+
+                row.Children.Add(button);
+
+                // A fixed size label that wraps: the width is the column, the height is room
+                // for three lines of the small font.
+                row.Children.Add(new TextLabelControl(
+                    text: captured.Description,
+                    fontName: GuiStyle.StandardFontName,
+                    fontSize: 14,
+                    textColor: new ElementColor(GuiStyle.DialogDefaultTextColor),
+                    orientation: TextOrientation.TopLeft,
+                    wordWrap: true,
+                    lineHeight: 18)
+                {
+                    Size = new PointD(330, 54),
+                    IsAutoSize = false,
+                    Margin = 6
+                });
+
+                parent.Children.Add(row);
             }
         }
 
@@ -157,9 +203,14 @@ namespace ModernVintageGUI.Samples
                 Padding = 0
             };
 
-            dialog.Add(new TitleBarControl(sample.Title) { Name = "titleBar" });
+            dialog.Children.Add(new TitleBarControl(sample.Title) { Name = "titleBar" });
 
-            RectangleControl content = dialog.Add(UI.Panel(10).WithName("content"));
+            var content = new RectangleControl(_Name: "content", _Margin: 0, _Padding: 10)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            dialog.Children.Add(content);
             sample.Build(content, capi);
 
             return dialog;
@@ -176,9 +227,14 @@ namespace ModernVintageGUI.Samples
                 Padding = 0
             };
 
-            dialog.Add(new TitleBarControl("Sample windows") { Name = "titleBar" });
+            dialog.Children.Add(new TitleBarControl("Sample windows") { Name = "titleBar" });
 
-            RectangleControl content = dialog.Add(UI.Column().WithName("content"));
+            var content = new RectangleControl(_Name: "content", _Margin: 0, _Padding: 0)
+            {
+                InsideOrientation = Orientation.Top
+            };
+
+            dialog.Children.Add(content);
             BuildGallery(content, open);
 
             return dialog;
