@@ -5,7 +5,6 @@ using IS2Mod.Enums;
 using System;
 using System.Text;
 using Vintagestory.API.Client;
-using Vintagestory.API.Common;
 
 namespace ModernVintageGUI.ControlTypes
 {
@@ -619,7 +618,7 @@ namespace ModernVintageGUI.ControlTypes
         #region Mouse
         private void OnMouseDown(object? sender, MouseEventArgs e)
         {
-            if (e.Button != EnumMouseButton.Left)
+            if (e.Button != Vintagestory.API.Common.EnumMouseButton.Left)
                 return;
 
             Dialog?.FocusControl(this);
