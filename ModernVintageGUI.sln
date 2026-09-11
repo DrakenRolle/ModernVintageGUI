@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZCasingCheck", "ModernVinta
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RecipeDesigner", "ModernVintageGUI\ZRecipeDesigner\RecipeDesigner.csproj", "{C6711900-35E7-4E00-B588-52D502797D0F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UIDesigner", "ModernVintageGUI\ZUIDesigner\UIDesigner.csproj", "{012EF032-8B6B-4BA0-936B-758009B1ABA8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -97,6 +99,18 @@ Global
 		{C6711900-35E7-4E00-B588-52D502797D0F}.Release|x64.Build.0 = Release|Any CPU
 		{C6711900-35E7-4E00-B588-52D502797D0F}.Release|x86.ActiveCfg = Release|Any CPU
 		{C6711900-35E7-4E00-B588-52D502797D0F}.Release|x86.Build.0 = Release|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Debug|x64.Build.0 = Debug|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Debug|x86.Build.0 = Debug|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Release|x64.ActiveCfg = Release|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Release|x64.Build.0 = Release|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Release|x86.ActiveCfg = Release|Any CPU
+		{012EF032-8B6B-4BA0-936B-758009B1ABA8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

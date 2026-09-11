@@ -1,0 +1,393 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject DesignerSession Session
+@inject TemplateLibrary Templates
+@inject IJSRuntime JS
+
+<PageTitle>ModernVintageGUI Designer</PageTitle>
+
+<div class="designer">
+
+    <div class="toolbar">
+        <h1 class="brand">ModernVintageGUI Designer</h1>
+
+        <div class="group">
+            <select value="@_template" @onchange="OnTemplateChanged" title="Start from a template">
+                <option value="">New document</option>
+                @foreach (DesignTemplate template in Templates.All)
+                {
+                    <option value="@template.Name">@template.Name</option>
+                }
+            </select>
+
+            <label class="filebutton">
+                Open…
+                <InputFile OnChange="OpenFile" accept=".mvgui,.xml" />
+            </label>
+
+            <button type="button" @onclick="SaveFile">Save</button>
+            <button type="button" @onclick="CopyCode" title="The C# that builds this tree">Copy C#</button>
+        </div>
+
+        <div class="group">
+            <button type="button" @onclick="Undo" disabled="@(!Session.Document.CanUndo)" title="Ctrl+Z">Undo</button>
+            <button type="button" @onclick="Redo" disabled="@(!Session.Document.CanRedo)" title="Ctrl+Y">Redo</button>
+        </div>
+
+        <div class="group">
+            <label>GUI scale</label>
+            <input type="range" min="0.5" max="3" step="0.25" value="@Session.LayoutScale"
+                   @onchange="OnScaleChanged" />
+            <span class="stat">@Session.LayoutScale.ToString("0.##")x</span>
+        </div>
+
+        <div class="group">
+            <label>Zoom</label>
+            <input type="range" min="0.5" max="3" step="0.25" value="@_zoom" @oninput="OnZoomChanged" />
+            <span class="stat">@_zoom.ToString("0.##")x</span>
+        </div>
+
+        <span class="spacer"></span>
+
+        <span class="stat">
+            @Session.Preview.Width x @Session.Preview.Height px
+            &middot; @Session.Preview.Nodes.Count controls
+            &middot; @Session.Preview.Milliseconds.ToString("0.0") ms
+        </span>
+    </div>
+
+    <div class="body">
+
+        <aside class="panel toolbox">
+            <h2>Toolbox</h2>
+            <div class="scroll">
+                @foreach (var category in ControlCatalog.ByCategory())
+                {
+                    <div class="category">@category.Key</div>
+
+                    @* A tab page is added by its Tabs control rather than dragged in. *@
+                    @foreach (ControlDescriptor descriptor in category.Where(d => d.Tag != ControlCatalog.TabTag))
+                    {
+                        <div class="tool" data-mvg-tool="@descriptor.Tag" title="@descriptor.Summary">
+                            @descriptor.Tag
+                            <small>@descriptor.Summary</small>
+                        </div>
+                    }
+                }
+            </div>
+        </aside>
+
+        <section class="panel stage">
+            <div class="stage-scroll">
+                @if (Session.Preview.Error != null)
+                {
+                    <div class="empty">@Session.Preview.Error</div>
+                }
+                else
+                {
+                    <div class="canvas" id="mvg-canvas">
+                        <img id="mvg-image" src="@Session.Preview.ImageDataUri"
+                             width="@((int)Math.Round(Session.Preview.Width * _zoom))"
+                             alt="The dialog as the game draws it" />
+                        <div id="mvg-overlay"></div>
+                    </div>
+                }
+            </div>
+
+            <div class="diagnostics">
+                @if (Session.Preview.Diagnostics.Count == 0 && Session.Preview.Error == null)
+                {
+                    <div class="row clean">The document builds cleanly.</div>
+                }
+                @foreach (Diagnostic diagnostic in Session.Preview.Diagnostics)
+                {
+                    <div class="row @(diagnostic.Severity == DiagnosticSeverity.Error ? "error" : "warning")">
+                        @(diagnostic.Severity == DiagnosticSeverity.Error ? "error" : "warning") @diagnostic
+                    </div>
+                }
+            </div>
+        </section>
+
+        <aside class="panel">
+            <h2>Outline</h2>
+            <div class="scroll outline" id="mvg-outline">
+                @if (Session.Document.Xml.Root != null)
+                {
+                    <OutlineNode Element="Session.Document.Xml.Root"
+                                 Path="@MarkupBuilder.RootPath"
+                                 Depth="0"
+                                 Selected="@Session.SelectedPath"
+                                 OnSelect="SelectPath" />
+                }
+            </div>
+
+            <h2>
+                Properties
+                @if (Session.SelectedPath != null)
+                {
+                    <span style="float:right;display:flex;gap:5px">
+                        <button type="button" @onclick="DuplicateSelected" title="Ctrl+D">Duplicate</button>
+                        <button type="button" @onclick="DeleteSelected" title="Delete">Delete</button>
+                    </span>
+                }
+            </h2>
+            <div class="scroll properties">
+                <PropertyGrid Element="Session.SelectedElement"
+                              Descriptor="Session.SelectedDescriptor"
+                              OnChange="SetAttribute" />
+            </div>
+        </aside>
+    </div>
+
+    <section class="markup @(_markupOpen ? "" : "collapsed")">
+        <header>
+            <button type="button" class="@(_showCode ? "" : "primary")" @onclick="() => _showCode = false">Markup</button>
+            <button type="button" class="@(_showCode ? "primary" : "")" @onclick="() => _showCode = true">C#</button>
+
+            <button type="button" @onclick="() => _markupOpen = !_markupOpen">
+                @(_markupOpen ? "Hide" : "Show")
+            </button>
+
+            @if (Session.MarkupError != null)
+            {
+                <span class="problem">@Session.MarkupError</span>
+            }
+
+            <span class="spacer" style="flex:1"></span>
+
+            <span class="stat">
+                @(_showCode
+                    ? "read only - what Copy C# puts on the clipboard"
+                    : "the document itself - editing it here is the same as editing the canvas")
+            </span>
+        </header>
+
+        @if (_showCode)
+        {
+            <textarea spellcheck="false" readonly value="@CodeGenerator.Generate(Session.Document)"></textarea>
+        }
+        else
+        {
+            <textarea spellcheck="false"
+                      value="@Session.MarkupText"
+                      @onchange="OnMarkupChanged"></textarea>
+        }
+    </section>
+</div>
+
+@code {
+    private DotNetObjectReference<Designer>? _self;
+    private bool _markupOpen = true;
+    private bool _showCode;
+    private double _zoom = 1.0;
+    private string _template = "";
+    private string _lastPushedState = "";
+
+    protected override void OnInitialized()
+    {
+        Session.Changed += OnSessionChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("mvgDesigner.init", _self);
+        }
+
+        await PushHitMap();
+    }
+
+    /// <summary>
+    /// Hands the browser the boxes of the current render. Everything the cursor does during a
+    /// drag is answered from this list without touching the server.
+    /// </summary>
+    private async Task PushHitMap()
+    {
+        var payload = new
+        {
+            nodes = Session.Preview.Nodes,
+            width = Session.Preview.Width,
+            height = Session.Preview.Height,
+            selected = Session.SelectedPath,
+        };
+
+        // Serialised here rather than by the interop layer, so the comparison that skips an
+        // unchanged push and the text that is actually sent are the same string.
+        string state = System.Text.Json.JsonSerializer.Serialize(payload);
+
+        if (state == _lastPushedState)
+            return;
+
+        _lastPushedState = state;
+
+        await JS.InvokeVoidAsync("mvgDesigner.update", state);
+    }
+
+    private void OnSessionChanged() => InvokeAsync(StateHasChanged);
+
+    #region Drag and drop
+    [JSInvokable]
+    public void DropNew(string tag, string parentPath, int index)
+    {
+        Session.Insert(tag, parentPath, index);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void DropMove(string sourcePath, string parentPath, int index)
+    {
+        Session.Move(sourcePath, parentPath, index);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void SelectPath(string? path)
+    {
+        Session.Select(path);
+        ShowPageOf(path);
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Picking a tab in the outline turns to that page. A tab that is not selected has its
+    /// content taken off the tree, so this is the only way to get at the pages behind the first.
+    /// </summary>
+    private void ShowPageOf(string? path)
+    {
+        if (path == null)
+            return;
+
+        XElement? element = Session.Document.ElementAt(path);
+
+        while (element?.Parent != null)
+        {
+            if (string.Equals(element.Name.LocalName, ControlCatalog.TabTag, StringComparison.OrdinalIgnoreCase))
+            {
+                int index = element.Parent.Elements().ToList().IndexOf(element);
+                Session.SelectTab(MarkupBuilder.PathOfElement(element.Parent), index);
+                return;
+            }
+
+            element = element.Parent;
+        }
+    }
+
+    [JSInvokable]
+    public void KeyCommand(string command)
+    {
+        switch (command)
+        {
+            case "delete": DeleteSelected(); break;
+            case "duplicate": DuplicateSelected(); break;
+            case "undo": Undo(); break;
+            case "redo": Redo(); break;
+        }
+
+        StateHasChanged();
+    }
+    #endregion
+
+    #region Commands
+    private void DeleteSelected()
+    {
+        if (Session.SelectedPath is string path)
+            Session.Delete(path);
+    }
+
+    private void DuplicateSelected()
+    {
+        if (Session.SelectedPath is string path)
+            Session.Duplicate(path);
+    }
+
+    private void Undo() => Session.Undo();
+
+    private void Redo() => Session.Redo();
+
+    private void SetAttribute((string Name, string? Value) change)
+    {
+        if (Session.SelectedPath is string path)
+            Session.SetAttribute(path, change.Name, change.Value);
+    }
+
+    private void OnScaleChanged(ChangeEventArgs args)
+    {
+        if (double.TryParse(args.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out double scale))
+        {
+            Session.SetScale(scale);
+        }
+    }
+
+    private void OnZoomChanged(ChangeEventArgs args)
+    {
+        if (double.TryParse(args.Value?.ToString(), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out double zoom))
+        {
+            _zoom = zoom;
+        }
+    }
+
+    private void OnMarkupChanged(ChangeEventArgs args)
+    {
+        Session.ApplyMarkupText(args.Value?.ToString() ?? "");
+    }
+
+    private void OnTemplateChanged(ChangeEventArgs args)
+    {
+        _template = args.Value?.ToString() ?? "";
+
+        string markup = _template.Length == 0
+            ? DesignDocument.Empty().ToMarkup()
+            : Templates.Get(_template)?.Markup ?? "";
+
+        DesignDocument? document = DesignDocument.Parse(markup, out string? error);
+
+        if (document != null)
+            Session.Load(document, _template.Length == 0 ? null : _template + ".mvgui");
+    }
+    #endregion
+
+    #region Files
+    private async Task OpenFile(InputFileChangeEventArgs args)
+    {
+        // A markup document is a few kilobytes; the cap is only there so a wrong file cannot
+        // pull an arbitrary amount into memory.
+        const long limit = 4 * 1024 * 1024;
+
+        using var reader = new StreamReader(args.File.OpenReadStream(limit));
+        string markup = await reader.ReadToEndAsync();
+
+        DesignDocument? document = DesignDocument.Parse(markup, out string? error);
+
+        if (document == null)
+        {
+            Session.ApplyMarkupText(markup);
+            return;
+        }
+
+        Session.Load(document, args.File.Name);
+    }
+
+    private async Task SaveFile()
+    {
+        string name = Session.FileName ?? "dialog.mvgui";
+        await JS.InvokeVoidAsync("mvgDesigner.download", name, Session.MarkupText);
+    }
+
+    private async Task CopyCode()
+    {
+        string code = CodeGenerator.Generate(Session.Document);
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", code);
+    }
+    #endregion
+
+    public void Dispose()
+    {
+        Session.Changed -= OnSessionChanged;
+        _self?.Dispose();
+    }
+}

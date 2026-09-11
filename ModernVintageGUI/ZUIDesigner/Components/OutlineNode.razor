@@ -1,0 +1,54 @@
+@* One row of the document outline, and the rows below it. Recursive, so it mirrors the
+   document rather than a flattened copy of it that could drift out of step. *@
+
+@* The row carries what a drag needs to know about it, so dropping onto the outline can be
+   answered in the browser like dropping onto the canvas is. *@
+<div class="node @(Path == Selected ? "selected" : "")"
+     style="padding-left:@(6 + Depth * 13)px"
+     data-mvg-path="@Path"
+     data-mvg-label="@Label"
+     data-mvg-tag="@Element.Name.LocalName"
+     data-mvg-capacity="@Capacity"
+     data-mvg-children="@Element.Elements().Count()"
+     @onclick="() => OnSelect.InvokeAsync(Path)">
+    <span class="tag">@Element.Name.LocalName</span>
+    @if (!string.IsNullOrEmpty(Name))
+    {
+        <span class="name">@Name</span>
+    }
+    @if (Unknown)
+    {
+        <span class="warn" title="No control of this name exists">?</span>
+    }
+</div>
+
+@foreach ((XElement child, int index) in Element.Elements().Select((e, i) => (e, i)))
+{
+    <OutlineNode Element="child"
+                 Path="@MarkupBuilder.ChildPath(Path, index)"
+                 Depth="Depth + 1"
+                 Selected="@Selected"
+                 OnSelect="OnSelect" />
+}
+
+@code {
+    [Parameter, EditorRequired] public XElement Element { get; set; } = null!;
+    [Parameter, EditorRequired] public string Path { get; set; } = "";
+    [Parameter] public int Depth { get; set; }
+    [Parameter] public string? Selected { get; set; }
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+
+    private string Name => (string?)Element.Attribute("Name")
+                           ?? (string?)Element.Attribute("Caption")
+                           ?? "";
+
+    private string Label => Element.Name.LocalName + (Name.Length > 0 ? " " + Name : "");
+
+    private bool Unknown =>
+        Element.Name.LocalName != ControlCatalog.TabTag &&
+        ControlCatalog.Get(Element.Name.LocalName) == null;
+
+    /// <summary>How many children may go in here. Zero for anything that is not a container.</summary>
+    private int Capacity =>
+        DesignDocument.CanHold(Element, out int capacity) ? capacity : 0;
+}

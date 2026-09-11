@@ -1,0 +1,15 @@
+<!-- Two stacks side by side, the pattern the control showcase is built from. -->
+<Dialog Name="root" InsideOrientation="Left" Padding="10" BackgroundColor="#33291fff">
+  <Rectangle Name="left" InsideOrientation="Top" Padding="6" BorderColor="#7f6a4cff">
+    <Label Name="leftHeading" Text="Left" FontSize="16" TextColor="#e8e2d6ff" />
+    <Button Name="one" Text="One" />
+    <Button Name="two" Text="Two" />
+    <Checkbox Name="agree" Text="Enabled" IsChecked="true" />
+  </Rectangle>
+  <Rectangle Name="right" InsideOrientation="Top" Padding="6" BorderColor="#7f6a4cff">
+    <Label Name="rightHeading" Text="Right" FontSize="16" TextColor="#e8e2d6ff" />
+    <ProgressBar Name="progress" Value="65" />
+    <Dropdown Name="pick" />
+    <ColorPicker Name="colour" />
+  </Rectangle>
+</Dialog>

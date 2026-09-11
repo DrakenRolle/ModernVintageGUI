@@ -1,0 +1,489 @@
+/* The designer chrome. The dialog being designed is a picture drawn by the framework itself,
+   so nothing in here styles a control - only the room the picture hangs in. */
+
+:root {
+    --ink: #e8e2d6;
+    --ink-dim: #a89f8d;
+    --ink-faint: #6f6858;
+
+    --bg: #191612;
+    --panel: #221e18;
+    --panel-high: #2b261e;
+    --line: #3a3328;
+
+    --accent: #c08a3e;
+    --accent-soft: rgba(192, 138, 62, 0.18);
+    --drop: #57b0e0;
+    --danger: #d4675a;
+    --ok: #7fa860;
+
+    --radius: 5px;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+}
+
+.shell, .designer {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ------------------------------------------------------------------ toolbar */
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 7px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+}
+
+.toolbar .brand {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.toolbar .group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.toolbar .spacer { flex: 1; }
+
+.toolbar label {
+    color: var(--ink-dim);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+button, select, input[type="text"], input[type="number"] {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel-high);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 4px 9px;
+}
+
+button { cursor: pointer; }
+
+button:hover:not(:disabled) { border-color: var(--accent); }
+
+button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+button.primary {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+input[type="range"] { accent-color: var(--accent); width: 120px; }
+
+.stat {
+    color: var(--ink-faint);
+    font-size: 11px;
+    font-family: var(--mono);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ layout */
+
+.body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 210px 1fr 320px;
+    min-height: 0;
+}
+
+.panel {
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.panel + .panel { border-left: 1px solid var(--line); }
+
+.panel h2 {
+    margin: 0;
+    padding: 8px 11px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ink-faint);
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-high);
+    flex: 0 0 auto;
+}
+
+.scroll {
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ------------------------------------------------------------------ toolbox */
+
+.toolbox { border-right: 1px solid var(--line); }
+
+.toolbox .category {
+    padding: 9px 11px 3px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ink-faint);
+}
+
+.tool {
+    display: block;
+    width: calc(100% - 16px);
+    margin: 2px 8px;
+    padding: 5px 9px;
+    text-align: left;
+    background: var(--panel-high);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+
+.tool:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.tool small {
+    display: block;
+    color: var(--ink-faint);
+    font-size: 11px;
+    line-height: 1.3;
+    margin-top: 1px;
+}
+
+/* ------------------------------------------------------------------ canvas */
+
+.stage {
+    background:
+        repeating-conic-gradient(#1d1a15 0% 25%, #171410 0% 50%) 50% / 22px 22px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.stage-scroll {
+    flex: 1;
+    overflow: auto;
+    display: grid;
+    place-items: center;
+    padding: 28px;
+    min-height: 0;
+}
+
+.canvas {
+    position: relative;
+    line-height: 0;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    /* The picture is what the game draws; nothing may sit between it and the eye. */
+    background: repeating-conic-gradient(#3a352c 0% 25%, #2e2a22 0% 50%) 50% / 16px 16px;
+}
+
+.canvas img {
+    display: block;
+    image-rendering: pixelated;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+#mvg-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.mvg-box {
+    position: absolute;
+    pointer-events: none;
+}
+
+.mvg-hover { outline: 1px dashed rgba(232, 226, 214, 0.45); }
+
+.mvg-selected {
+    outline: 2px solid var(--accent);
+    background: rgba(192, 138, 62, 0.09);
+}
+
+.mvg-box-label {
+    position: absolute;
+    top: -19px;
+    left: -2px;
+    padding: 1px 5px;
+    font: 10px/1.5 var(--mono);
+    white-space: nowrap;
+    color: #191612;
+    background: var(--accent);
+    border-radius: 3px 3px 0 0;
+}
+
+.mvg-droptarget {
+    outline: 2px solid var(--drop);
+    background: rgba(87, 176, 224, 0.12);
+}
+
+.mvg-droptarget .mvg-box-label {
+    background: var(--drop);
+    color: #06141c;
+}
+
+.mvg-caret-h, .mvg-caret-v {
+    background: var(--drop);
+    box-shadow: 0 0 7px 2px rgba(87, 176, 224, 0.85);
+    border-radius: 2px;
+}
+
+.mvg-caret-h { height: 3px !important; margin-top: -1px; }
+.mvg-caret-v { width: 3px !important; margin-left: -1px; }
+
+.mvg-area {
+    outline: 2px dashed var(--drop);
+    background: rgba(87, 176, 224, 0.14);
+}
+
+.mvg-ghost {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    padding: 3px 9px;
+    font-size: 12px;
+    color: #06141c;
+    background: var(--drop);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+.mvg-ghost-no {
+    background: var(--danger);
+    color: #fff;
+}
+
+body.mvg-dragging { cursor: grabbing; }
+body.mvg-dragging * { cursor: grabbing !important; }
+
+/* ------------------------------------------------------------------ diagnostics */
+
+.diagnostics {
+    flex: 0 0 auto;
+    max-height: 132px;
+    overflow: auto;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    padding: 6px 11px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+}
+
+.diagnostics .row { padding: 1px 0; }
+.diagnostics .error { color: var(--danger); }
+.diagnostics .warning { color: var(--accent); }
+.diagnostics .clean { color: var(--ok); }
+
+/* ------------------------------------------------------------------ outline */
+
+.outline { padding: 4px 0 8px; }
+
+.node {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px 2px 0;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+    white-space: nowrap;
+}
+
+.node:hover { background: var(--panel-high); }
+
+.node.selected {
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.node .tag { color: var(--ink); }
+.node .name { color: var(--ink-faint); font-size: 11.5px; }
+.node .warn { color: var(--danger); }
+
+/* ------------------------------------------------------------------ properties */
+
+.properties { padding: 6px 0 14px; }
+
+.prop-group {
+    padding: 8px 11px 2px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ink-faint);
+}
+
+.prop {
+    display: grid;
+    grid-template-columns: 42% 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 11px;
+}
+
+.prop label {
+    color: var(--ink-dim);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.prop label.set { color: var(--ink); font-weight: 600; }
+
+.prop input[type="text"], .prop select, .prop input[type="number"] {
+    width: 100%;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+.prop input[type="checkbox"] { accent-color: var(--accent); }
+
+.prop .colour {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.prop .colour input[type="color"] {
+    width: 28px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--line);
+    background: none;
+}
+
+.empty {
+    padding: 14px 12px;
+    color: var(--ink-faint);
+    font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ markup pane */
+
+.markup {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+}
+
+.markup header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 11px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-high);
+}
+
+.markup header .title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ink-faint);
+}
+
+.markup header .problem { color: var(--danger); font-family: var(--mono); font-size: 11.5px; }
+
+.markup textarea {
+    border: 0;
+    resize: none;
+    width: 100%;
+    height: 190px;
+    padding: 9px 12px;
+    background: #15120e;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    tab-size: 2;
+    outline: none;
+}
+
+.markup.collapsed textarea { display: none; }
+
+/* The file input is invisible; its label is the button that opens it. */
+.filebutton {
+    display: inline-block;
+    padding: 4px 9px;
+    background: var(--panel-high);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.filebutton:hover { border-color: var(--accent); }
+
+.filebutton input[type="file"] { display: none; }
+
+/* A container with nothing in it measures to twice its padding, so during a drag the designer
+   draws a zone over each one - without it the only containers you could aim at would be the
+   ones that already have something in them. */
+.mvg-emptyzone {
+    outline: 1px dashed rgba(87, 176, 224, 0.5);
+    background: rgba(87, 176, 224, 0.05);
+}
+
+/* Dropping onto the outline. Into a row, or between two of them - the same two answers the
+   canvas gives, drawn where the rows are. */
+.node.drop-into {
+    background: rgba(87, 176, 224, 0.18);
+    box-shadow: inset 0 0 0 1px var(--drop);
+}
+
+.node.drop-before, .node.drop-after {
+    position: relative;
+}
+
+.node.drop-before::before, .node.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--drop);
+    box-shadow: 0 0 7px 2px rgba(87, 176, 224, 0.8);
+    border-radius: 2px;
+}
+
+.node.drop-before::before { top: -1px; }
+.node.drop-after::after { bottom: -1px; }
